@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # TypeScript implementation
+  ts-commander:
+    build:
+      context: ./ts
+      dockerfile: Dockerfile
+    volumes:
+      - ~/.config:/root/.config
+      - ~/:/home/user
+    environment:
+      - NODE_ENV=production
+    stdin_open: true
+    tty: true
+
+  # Python implementation
+  py-commander:
+    build:
+      context: ./py
+      dockerfile: Dockerfile
+    volumes:
+      - ~/.config:/root/.config
+      - ~/:/home/user
+    stdin_open: true
+    tty: true
