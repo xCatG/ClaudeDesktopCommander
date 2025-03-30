@@ -15,7 +15,7 @@ from desktop_commander.mcp_command_manager import command_manager, register_comm
 from desktop_commander.tools.terminal import register_tools as register_terminal_tools
 from desktop_commander.tools.process import register_tools as register_process_tools
 from desktop_commander.tools.filesystem import register_tools as register_filesystem_tools
-from desktop_commander.tools.memo_tool import get_tool_functions as get_memo_tool_functions
+from desktop_commander.tools.memo import register_tools as register_memo_tools
 
 # Define our MCP server
 mcp = FastMCP("Desktop Commander")
@@ -23,15 +23,11 @@ mcp = FastMCP("Desktop Commander")
 # Register command management tools
 register_command_tools(mcp, command_manager)
 
-# Register memo tool functions
-memo_functions = get_memo_tool_functions()
-for name, tool_def in memo_functions.items():
-    mcp.tool(name=name, description=tool_def["description"])(tool_def["function"])
-
-# Register modular tools
+# Register all modular tools
 register_terminal_tools(mcp, command_manager)
 register_process_tools(mcp)
 register_filesystem_tools(mcp)
+register_memo_tools(mcp)
 
 # Print initialization message
 print(f"Desktop Commander MCP Server initialized", file=sys.stderr)
