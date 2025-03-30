@@ -88,6 +88,33 @@ For commands that may take a while:
 3. Use `read_output` with PID to get new output
 4. Use `force_terminate` to stop if needed
 
+## Windows Subsystem for Linux (WSL) Support
+
+If you want to run the Desktop Commander MCP server under WSL and make it available to Claude Desktop on Windows, you can add the following configuration to your `claude_desktop_config.json` file:
+
+```json
+"desktopCommanderPyWSL": {
+  "command": "wsl",
+  "args": [
+    "-e", "bash", "-c", "cd /home/<username>/src/ClaudeDesktopCommander/py && source venv/bin/activate && python -m desktop_commander.mcp_server"
+  ]
+}
+```
+
+Replace `<username>` with your actual WSL username.
+
+### Notes on WSL Setup:
+
+- The setup script cannot directly modify the Windows configuration file from WSL since it runs in the Linux environment
+- You'll need to manually add the entry to your Claude Desktop configuration file located at:
+  - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Make sure the path to your project directory in WSL is correctly specified in the command
+- The server needs to be started from the correct directory with the virtual environment activated
+
+Future improvements:
+- More generic path handling for WSL configuration
+- Potential setup script enhancements to help with WSL configuration
+
 ## Security
 
 Desktop Commander MCP has security features to protect your system:
