@@ -36,6 +36,14 @@ def main():
         print(f"Python version: {sys.version}", file=sys.stderr)
         print(f"Current directory: {os.getcwd()}", file=sys.stderr)
         
+        # List available tools categories
+        print("Available tool categories:", file=sys.stderr)
+        print("- Terminal tools: execute_command, read_output, force_terminate, list_sessions", file=sys.stderr)
+        print("- Process tools: list_processes, kill_process", file=sys.stderr)
+        print("- Filesystem tools: read_file, write_file, list_directory, create_directory, etc.", file=sys.stderr)
+        print("- Command management: block_command, unblock_command, list_blocked_commands", file=sys.stderr)
+        print("- Memo tools: read_memo, write_memo, append_memo", file=sys.stderr)
+        
         # Run the MCP server
         # The run() method automatically handles all of the MCP protocol
         # including initialization, capability negotiation, and message handling

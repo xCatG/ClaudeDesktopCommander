@@ -73,7 +73,52 @@ Search/Replace Block Format:
 ```
 filepath.ext
 <<<<<<< SEARCH
-existing code to replace
+new code to insert
+>>>>>>> REPLACE
+```
+
+## Security Features
+
+- Blocked commands list prevents dangerous operations
+- Path validation restricts file access to allowed directories
+- Symlink security to prevent path traversal attacks
+
+## Handling Long-Running Commands
+
+For commands that may take a while:
+
+1. `execute_command` returns after timeout with initial output
+2. Command continues in background
+3. Use `read_output` with PID to get new output
+4. Use `force_terminate` to stop if needed
+
+## Implementation Details
+
+This Python implementation uses the official Anthropic MCP Python SDK which:
+
+- Handles JSON-RPC 2.0 communication
+- Manages client-server lifecycle
+- Negotiates capabilities
+- Provides a clean interface for tool registration
+
+## WSL Support
+
+When running under Windows Subsystem for Linux (WSL):
+
+- Use the `wsl` command in the Claude Desktop config
+- Be aware of path differences between Windows and Linux
+- The memo file is stored at the project root
+
+## Troubleshooting
+
+- **Connection Issues**: Ensure Claude desktop is properly configured and restarted after installation
+- **Permission Errors**: Check that scripts have executable permissions
+- **Path Access Errors**: Only paths within allowed directories can be accessed
+- **Blocked Commands**: Some dangerous commands are blocked by default for security
+
+## License
+
+MIT
 =======
 new code to insert
 >>>>>>> REPLACE
