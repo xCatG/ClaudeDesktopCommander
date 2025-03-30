@@ -25,9 +25,9 @@ class MemoTool:
             root_dir: Optional root directory to limit file access
         """
         self.root_dir = root_dir or os.path.expanduser("~")
-        # Go up one more directory level to reach the project root
-        self.memo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))))), "claude_memo.md")
+        # Go up two directory levels to reach the project root
+        self.memo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), "claude_memo.md")
     
     def read_memo(self) -> str:
         """

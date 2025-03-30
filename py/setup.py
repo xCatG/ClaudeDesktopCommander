@@ -15,7 +15,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "desktop-commander-py=desktop_commander.main:main",
+            "desktop-commander-py=desktop_commander.mcp_server:main",
             "desktop-commander-py-setup=scripts.setup_claude_server:main"
         ],
     },

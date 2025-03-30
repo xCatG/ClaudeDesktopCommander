@@ -43,3 +43,10 @@
 - Successfully verified memo tools on March 29, 2025
 - All three functions (read, write, append) are working properly
 - This entry was added using the append_memo tool
+
+
+## WSL Support - March 29, 2025
+- Added documentation for running under Windows Subsystem for Linux (WSL)
+- Added example configuration for claude_desktop_config.json
+- Noted limitations around setup script and path handling for WSL
+- Future improvement ideas: more generic path handling, setup script enhancements for WSL
