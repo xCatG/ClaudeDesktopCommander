@@ -20,12 +20,19 @@ from mcp.server.fastmcp import FastMCP, Context
 
 # Import command manager
 from desktop_commander.mcp_command_manager import command_manager, register_command_tools
+# Import memo tool functions
+from desktop_commander.tools.memo_tool import get_tool_functions as get_memo_tool_functions
 
 # Define our MCP server
 mcp = FastMCP("Desktop Commander")
 
 # Register command management tools
 register_command_tools(mcp, command_manager)
+
+# Register memo tool functions
+memo_functions = get_memo_tool_functions()
+for name, tool_def in memo_functions.items():
+    mcp.tool(name=name, description=tool_def["description"])(tool_def["function"])
 
 # Store active sessions
 active_sessions = {}
