@@ -1,0 +1,17 @@
+{
+  "blockedCommands": [
+    "adduser",
+    "dd",
+    "fdisk",
+    "format",
+    "groupadd",
+    "mkfs",
+    "mount",
+    "passwd",
+    "su",
+    "sudo",
+    "umount",
+    "useradd",
+    "usermod"
+  ]
+}

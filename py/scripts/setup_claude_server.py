@@ -4,7 +4,6 @@ import sys
 import json
 import platform
 import logging
-import asyncio
 from pathlib import Path
 
 
@@ -40,10 +39,10 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
-async def main():
+def main():
     """Main setup function for Claude desktop integration."""
     logger = setup_logging()
-    logger.info("Starting Claude desktop setup")
+    logger.info("Starting Claude desktop setup for MCP")
     
     # Get Claude config path
     claude_config_path = get_claude_config_path()
@@ -61,17 +60,11 @@ async def main():
         system = platform.system()
         if system == "Windows":
             default_config = {
-                "serverConfig": {
-                    "command": "cmd.exe",
-                    "args": ["/c"]
-                }
+                "mcpServers": {}
             }
         else:  # macOS/Linux
             default_config = {
-                "serverConfig": {
-                    "command": "/bin/sh",
-                    "args": ["-c"]
-                }
+                "mcpServers": {}
             }
         
         # Write default config
@@ -85,21 +78,25 @@ async def main():
         with open(claude_config_path, "r") as f:
             config = json.load(f)
         
-        # Prepare the server config
+        # Get the script path
+        script_path = os.path.abspath(__file__)
+        main_script_path = os.path.join(os.path.dirname(os.path.dirname(script_path)), 
+                                       "desktop_commander", "mcp_server.py")
+        
         # Check if running from installed package or local directory
-        script_path = os.path.abspath(sys.argv[0])
         is_installed = "site-packages" in script_path
         
         if is_installed:
+            # Running from installed package
             server_config = {
                 "command": sys.executable,
-                "args": ["-m", "desktop_commander.main"]
+                "args": ["-m", "desktop_commander.mcp_server"]
             }
         else:
             # Running from local directory
             server_config = {
                 "command": sys.executable,
-                "args": [os.path.join(os.getcwd(), "desktop_commander", "main.py")]
+                "args": [main_script_path]
             }
         
         # Add or update the MCP server config
@@ -117,7 +114,7 @@ async def main():
         logger.info(
             "\nTo use the server:\n"
             "1. Restart Claude if it's currently running\n"
-            "2. The server will be available in Claude's MCP server list"
+            "2. The server will be available in Claude's MCP server list as 'desktopCommanderPy'"
         )
         
     except Exception as e:
@@ -126,4 +123,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
