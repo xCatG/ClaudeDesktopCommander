@@ -1,6 +1,9 @@
 """
 Project navigation and context tools for Desktop Commander MCP Server.
 Helps with discovering and navigating project structures and loading project contexts.
+
+The tools scan the ~/src directory by default for projects (configurable via project_default_path
+in config.json), looking both at direct subdirectories and one level deeper to find relevant projects.
 """
 
 import os
@@ -9,6 +12,35 @@ import json
 import glob
 from typing import List, Dict, Optional
 from pathlib import Path
+
+# Load configuration
+def load_config():
+    """Load configuration from config.json file."""
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                return json.load(f)
+        else:
+            print(f"Warning: Config file not found at {config_path}", file=sys.stderr)
+            return {"project_default_path": "src"}
+    except Exception as e:
+        print(f"Error loading config: {str(e)}", file=sys.stderr)
+        return {"project_default_path": "src"}
+
+# Get the project default path from config
+config = load_config()
+PROJECT_DEFAULT_PATH = config.get("project_default_path", "src")
+
+# Expand the project path
+def get_project_base_dir():
+    """Get the expanded project base directory."""
+    home_dir = os.path.expanduser("~")
+    # If PROJECT_DEFAULT_PATH is an absolute path, use it directly
+    if os.path.isabs(PROJECT_DEFAULT_PATH):
+        return PROJECT_DEFAULT_PATH
+    # Otherwise, join with home directory
+    return os.path.join(home_dir, PROJECT_DEFAULT_PATH)
 
 # Track the currently active project
 current_project = {
@@ -22,9 +54,160 @@ def register_tools(mcp):
     """Register project navigation tools with the MCP server."""
     
     @mcp.tool()
+    def explore_project(project_path: str = None) -> str:
+        """
+        Explore a project and generate a high-level understanding.
+        
+        Args:
+            project_path: Optional path to the project (uses current project if not specified)
+            
+        Returns:
+            Summary of project exploration and analysis
+        """
+        try:
+            # Use current project if no path specified
+            if not project_path:
+                if not current_project["path"]:
+                    return "No active project. Use discover_projects and use_project to select a project."
+                project_path = current_project["path"]
+            
+            project_path = os.path.abspath(project_path)
+            if not os.path.exists(project_path):
+                return f"Project not found: {project_path}"
+            
+            # Get project info
+            project_info = _check_if_project(project_path) or {}
+            project_name = project_info.get("name") or os.path.basename(project_path)
+            
+            # Create project analysis
+            analysis = {}
+            
+            # Check for repository information
+            git_path = os.path.join(project_path, ".git")
+            has_git = os.path.exists(git_path)
+            analysis["has_git"] = has_git
+            
+            # Check for common project files
+            common_files = {
+                "package.json": "Node.js/JavaScript",
+                "setup.py": "Python",
+                "requirements.txt": "Python",
+                "Cargo.toml": "Rust",
+                "pom.xml": "Java/Maven",
+                "build.gradle": "Java/Gradle",
+                "CMakeLists.txt": "C++/CMake",
+                "Makefile": "C/C++",
+                "Dockerfile": "Docker",
+                "docker-compose.yml": "Docker Compose",
+                "go.mod": "Go",
+                "mix.exs": "Elixir",
+                "Gemfile": "Ruby"
+            }
+            
+            detected_types = []
+            for file, tech_type in common_files.items():
+                if os.path.exists(os.path.join(project_path, file)):
+                    detected_types.append(tech_type)
+            
+            analysis["detected_types"] = detected_types
+            
+            # Collect directory structure information
+            dirs = []
+            files_by_ext = {}
+            
+            for root, directories, files in os.walk(project_path, topdown=True):
+                # Skip git and virtual environment directories
+                directories[:] = [d for d in directories if d not in [".git", "node_modules", "__pycache__", "venv", ".venv", "env", ".env"]]
+                
+                rel_path = os.path.relpath(root, project_path)
+                if rel_path != ".":
+                    dirs.append(rel_path)
+                
+                # Count file extensions
+                for file in files:
+                    _, ext = os.path.splitext(file)
+                    if ext:
+                        ext = ext.lower()
+                        files_by_ext[ext] = files_by_ext.get(ext, 0) + 1
+            
+            analysis["directories"] = dirs[:10]  # Limit to top 10 directories
+            analysis["file_types"] = {k: v for k, v in sorted(files_by_ext.items(), key=lambda item: item[1], reverse=True)[:10]}
+            
+            # Generate summary text
+            summary = [f"# Project Analysis: {project_name}"]
+            
+            # Project type
+            if detected_types:
+                summary.append("\n## Project Type")
+                summary.append(f"This appears to be a {', '.join(detected_types)} project.")
+            
+            # Repository info
+            summary.append("\n## Repository")
+            if has_git:
+                summary.append("This project is a Git repository.")
+            else:
+                summary.append("This project is not a Git repository.")
+            
+            # Structure summary
+            summary.append("\n## Structure Overview")
+            if dirs:
+                summary.append("Key directories:")
+                for d in analysis["directories"][:5]:
+                    summary.append(f"- {d}")
+            
+            # File types
+            if files_by_ext:
+                summary.append("\nFile types:")
+                for ext, count in analysis["file_types"].items():
+                    summary.append(f"- {ext}: {count} files")
+            
+            # Create memo suggestion
+            memo_suggestion = "\n## Suggested Memo Content\n"
+            memo_suggestion += f"""
+# Project: {project_name}
+
+## Overview
+- {project_name} is a {'/'.join(detected_types[:2]) if detected_types else 'software'} project
+- {len(analysis.get('directories', []))} directories and multiple file types found
+- Main technologies: {', '.join(detected_types) if detected_types else 'Unknown'}
+
+## Current Status
+- Initial project exploration completed on {datetime.now().strftime('%Y-%m-%d')}
+- Further analysis needed for specific functionality
+
+## Action Items
+### TODO
+- [ ] High: Review project documentation
+- [ ] Medium: Identify key components
+- [ ] Medium: Document project architecture
+
+## Knowledge Base
+### Implementation
+- {', '.join(detected_types) if detected_types else 'Unknown'} project structure
+- Key directories: {', '.join(analysis.get('directories', [])[:3]) if analysis.get('directories') else 'None identified'}
+"""
+            
+            # Combine everything
+            result = "\n".join(summary) + "\n\n" + memo_suggestion
+            
+            # Create a basic memo structure if there's no memo
+            if not project_info.get("has_memo"):
+                memo_path = os.path.join(project_path, "claude_memo.md")
+                try:
+                    with open(memo_path, "w") as f:
+                        f.write(memo_suggestion.strip())
+                    result += f"\n\nCreated initial memo file at: {memo_path}"
+                except Exception as e:
+                    result += f"\n\nFailed to create memo file: {str(e)}"
+            
+            return result
+        except Exception as e:
+            return f"Error exploring project: {str(e)}"
+    
+    @mcp.tool()
     def discover_projects(base_dir: Optional[str] = None) -> str:
         """
-        Discover potential projects in the specified directory or current directory.
+        Discover potential projects in the specified directory or default project directory.
         
         A directory is considered a potential project if it contains:
         - A git repository (.git directory)
@@ -32,12 +215,12 @@ def register_tools(mcp):
         - A claude_memo.md file
         
         Args:
-            base_dir: Base directory to search for projects (defaults to current directory)
+            base_dir: Base directory to search for projects (defaults to configured project_default_path)
         
         Returns:
             List of potential projects with their metadata
         """
-        base_dir = base_dir or os.getcwd()
+        base_dir = base_dir or get_project_base_dir()
         try:
             base_dir = os.path.abspath(base_dir)
             if not os.path.exists(base_dir):
@@ -55,6 +238,22 @@ def register_tools(mcp):
                 project_info = _check_if_project(item_path)
                 if project_info:
                     projects.append(project_info)
+                    
+                # If it's not a project itself, check one level deeper
+                elif os.path.isdir(item_path):
+                    try:
+                        for subitem in os.listdir(item_path):
+                            subitem_path = os.path.join(item_path, subitem)
+                            if not os.path.isdir(subitem_path):
+                                continue
+                            
+                            # Check if this subdirectory looks like a project
+                            sub_project_info = _check_if_project(subitem_path)
+                            if sub_project_info:
+                                projects.append(sub_project_info)
+                    except (PermissionError, OSError):
+                        # Skip directories we can't access
+                        pass
             
             if not projects:
                 return f"No projects found in {base_dir}"
@@ -102,10 +301,17 @@ def register_tools(mcp):
             # If there's a memo, load and return it
             if project_info["has_memo"]:
                 memo_content = _load_memo(project_info["memo_path"])
-                return f"Switched to project: {project_info['name']}\n\nProject context from memo:\n\n{memo_content}"
+                return f"Switched to project: {project_info['name']}\n\nProject memo found! Reading context...\n\nProject context from memo:\n\n{memo_content}"
             else:
-                # No memo, return basic project info
-                return f"Switched to project: {project_info['name']}\n\nNo memo file found. Creating a new project context would help maintain knowledge about this project."
+                # No memo, suggest exploration and creation
+                return f"""Switched to project: {project_info['name']}
+
+No project memo found. Would you like me to:
+1. Explore the project and create an initial understanding?
+2. Create a basic memo structure for this project?
+3. Continue without a project memo?
+
+Creating a project memo would help maintain knowledge about this project across conversations."""
         except Exception as e:
             return f"Error using project: {str(e)}"
     
@@ -160,6 +366,114 @@ def register_tools(mcp):
             return f"Created project memo for {current_project['name']}"
         except Exception as e:
             return f"Error creating project memo: {str(e)}"
+            
+    @mcp.tool()
+    def index_file(file_path: str, description: str, category: str = "Uncategorized") -> str:
+        """
+        Add or update a file in the project's file index.
+        
+        Args:
+            file_path: Path to the file to index (relative to project root)
+            description: Brief description of the file's purpose
+            category: Category for organization (e.g., "Core", "Utils", "Tests")
+            
+        Returns:
+            Success message or error
+        """
+        global current_project
+        if not current_project["path"]:
+            return "No active project. Use discover_projects and use_project to select a project."
+            
+        try:
+            # Make sure file exists
+            absolute_path = file_path
+            if not os.path.isabs(file_path):
+                absolute_path = os.path.join(current_project["path"], file_path)
+                
+            if not os.path.exists(absolute_path):
+                return f"File not found: {file_path}"
+                
+            # Get file metadata
+            mtime = os.path.getmtime(absolute_path)
+            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+            file_size = os.path.getsize(absolute_path)
+            size_str = f"{file_size / 1024:.1f} KB" if file_size >= 1024 else f"{file_size} bytes"
+            
+            # Create file index entry
+            entry = {
+                "path": file_path,
+                "description": description,
+                "category": category,
+                "last_modified": mtime_str,
+                "size": size_str
+            }
+            
+            # Read memo content to find file index section
+            memo_path = current_project.get("memo_path")
+            if not memo_path or not os.path.exists(memo_path):
+                return "No memo file found. Create a project memo first."
+                
+            with open(memo_path, "r") as f:
+                content = f.read()
+                
+            # Look for File Index section
+            file_index_section = re.search(r"## File Index\n(.*?)(?=\n##|\Z)", content, re.DOTALL)
+            file_index_entries = {}
+            
+            if file_index_section:
+                # Parse existing entries
+                section_content = file_index_section.group(1)
+                category_pattern = r"### (.*?)\n(.*?)(?=\n###|\Z)"
+                for category_match in re.finditer(category_pattern, section_content, re.DOTALL):
+                    cat_name = category_match.group(1)
+                    cat_content = category_match.group(2)
+                    
+                    if cat_name not in file_index_entries:
+                        file_index_entries[cat_name] = []
+                        
+                    file_pattern = r"- \*\*(.*?)\*\*: (.*)"
+                    for file_match in re.finditer(file_pattern, cat_content):
+                        file_path = file_match.group(1)
+                        file_desc = file_match.group(2)
+                        file_index_entries[cat_name].append((file_path, file_desc))
+            
+            # Add or update entry
+            if entry["category"] not in file_index_entries:
+                file_index_entries[entry["category"]] = []
+                
+            # Check if file already exists
+            found = False
+            for i, (path, _) in enumerate(file_index_entries[entry["category"]]):
+                if path == entry["path"]:
+                    # Update existing entry
+                    file_index_entries[entry["category"]][i] = (entry["path"], entry["description"])
+                    found = True
+                    break
+                    
+            if not found:
+                file_index_entries[entry["category"]].append((entry["path"], entry["description"]))
+            
+            # Generate new file index content
+            new_index_content = "\n## File Index\n"
+            for cat, entries in sorted(file_index_entries.items()):
+                new_index_content += f"\n### {cat}\n"
+                for path, desc in sorted(entries):
+                    new_index_content += f"- **{path}**: {desc}\n"
+            
+            # Replace or append file index section
+            if file_index_section:
+                updated_content = content.replace(file_index_section.group(0), new_index_content)
+            else:
+                # Append at the end
+                updated_content = content.rstrip() + "\n" + new_index_content
+            
+            # Write updated content back to memo
+            with open(memo_path, "w") as f:
+                f.write(updated_content)
+                
+            return f"Successfully indexed file: {file_path} in category: {entry['category']}"
+        except Exception as e:
+            return f"Error indexing file: {str(e)}"
     
     @mcp.tool()
     def search_for_project(name: str, base_dir: Optional[str] = None) -> str:
@@ -168,12 +482,12 @@ def register_tools(mcp):
         
         Args:
             name: Name or partial name of the project
-            base_dir: Base directory to search in (defaults to parent of current directory)
+            base_dir: Base directory to search in (defaults to configured project_default_path)
             
         Returns:
             Project matches if found
         """
-        base_dir = base_dir or os.path.dirname(os.getcwd())
+        base_dir = base_dir or get_project_base_dir()
         try:
             base_dir = os.path.abspath(base_dir)
             if not os.path.exists(base_dir):

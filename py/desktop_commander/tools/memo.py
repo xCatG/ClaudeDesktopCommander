@@ -1,108 +1,89 @@
 """
-Memo tools for the Desktop Commander MCP Server.
-Allows Claude to maintain context across conversations via a memory file.
+Enhanced memo tools for the Desktop Commander MCP Server.
+Allows Claude to maintain structured context across conversations via a memory file.
+
+This module provides both legacy memo functions and enhanced structured memo tools
+that support section-based updates, todos, and change logs.
 """
 
 import os
-import json
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+# Import the structured memo implementation
+from desktop_commander.tools.structured_memo import StructuredMemoTool
 
 logger = logging.getLogger(__name__)
-
-class MemoTool:
-    """
-    Class for reading and updating the Claude memory file.
-    """
-    
-    def __init__(self, root_dir: str = None):
-        """
-        Initialize the memo tool.
-        
-        Args:
-            root_dir: Optional root directory to limit file access
-        """
-        self.root_dir = root_dir or os.path.expanduser("~")
-        # Go up two directory levels to reach the project root
-        self.memo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "claude_memo.md")
-    
-    def read_memo(self) -> str:
-        """
-        Read the Claude memo file.
-        
-        Returns:
-            Content of the memo file
-        """
-        try:
-            if not os.path.exists(self.memo_path):
-                # Create empty memo file if it doesn't exist
-                with open(self.memo_path, "w") as f:
-                    f.write("# Claude Memory File\n\nNo memories stored yet.")
-                
-            with open(self.memo_path, "r") as f:
-                content = f.read()
-                
-            return content
-        except Exception as e:
-            logger.error(f"Error reading memo file: {e}")
-            return f"Error reading memo file: {e}"
-    
-    def write_memo(self, content: str) -> str:
-        """
-        Write to the Claude memo file.
-        
-        Args:
-            content: New content for the memo file
-            
-        Returns:
-            Success message
-        """
-        try:
-            with open(self.memo_path, "w") as f:
-                f.write(content)
-                
-            return "Memo successfully updated"
-        except Exception as e:
-            logger.error(f"Error writing to memo file: {e}")
-            return f"Error writing to memo file: {e}"
-    
-    def append_memo(self, content: str) -> str:
-        """
-        Append to the Claude memo file.
-        
-        Args:
-            content: Content to append to the memo file
-            
-        Returns:
-            Success message
-        """
-        try:
-            current_content = self.read_memo()
-            updated_content = current_content + "\n\n" + content
-            
-            with open(self.memo_path, "w") as f:
-                f.write(updated_content)
-                
-            return "Content successfully appended to memo"
-        except Exception as e:
-            logger.error(f"Error appending to memo file: {e}")
-            return f"Error appending to memo file: {e}"
 
 def register_tools(mcp):
     """Register memo tools with the MCP server."""
     
-    # Create a single instance of the memo tool
-    memo_tool = MemoTool()
+    # Create a single instance of the structured memo tool
+    memo_tool = StructuredMemoTool()
     
     @mcp.tool()
-    def read_memo() -> str:
+    def read_memo(section: str = None) -> str:
         """
-        Read the Claude memory file to recall information about projects.
+        Read the Claude memory file or a specific section.
+        
+        Args:
+            section: Optional section name to read (e.g., "Action Items.TODO")
         """
-        return memo_tool.read_memo()
+        return memo_tool.read_memo(section)
     
+    @mcp.tool()
+    def update_memo_section(section: str, content: str) -> str:
+        """
+        Update a specific section of the memo.
+        
+        Args:
+            section: Section path using dot notation (e.g., "Action Items.TODO")
+            content: New content for the section
+        """
+        return memo_tool.update_memo_section(section, content)
+    
+    @mcp.tool()
+    def add_todo(task: str, priority: str = "Medium") -> str:
+        """
+        Add a new TODO item with priority.
+        
+        Args:
+            task: Task description
+            priority: Priority level (High, Medium, Low)
+        """
+        return memo_tool.add_todo(task, priority)
+    
+    @mcp.tool()
+    def complete_todo(task_pattern: str) -> str:
+        """
+        Mark a TODO item as completed and move to COMPLETED section.
+        
+        Args:
+            task_pattern: Pattern to match the task
+        """
+        return memo_tool.complete_todo(task_pattern)
+    
+    @mcp.tool()
+    def add_change_log(change: str, version: str = None) -> str:
+        """
+        Add a change log entry.
+        
+        Args:
+            change: Change description
+            version: Optional version or date (defaults to today)
+        """
+        return memo_tool.add_change_log(change, version)
+    
+    @mcp.tool()
+    def consolidate_memo() -> str:
+        """
+        Consolidate the memo for better maintainability.
+        Limits completed items and consolidates old change log entries.
+        """
+        return memo_tool.consolidate_memo()
+    
+    # Legacy methods for backward compatibility
     @mcp.tool()
     def write_memo(content: str) -> str:
         """

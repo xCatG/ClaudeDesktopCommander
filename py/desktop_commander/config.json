@@ -13,5 +13,6 @@
     "umount",
     "useradd",
     "usermod"
-  ]
+  ],
+  "project_default_path": "src"
 }
