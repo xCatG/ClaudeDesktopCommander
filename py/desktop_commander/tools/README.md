@@ -31,11 +31,20 @@ Process management:
   - `search_code`: Search file contents (uses ripgrep when available)
   - `edit_block`: Apply surgical text replacements
 
-### Memo Tools (memo_tool.py)
+### Memo Tools (memo.py)
 
 - `read_memo`: Read the Claude memory file
 - `write_memo`: Replace the memory file content
 - `append_memo`: Add content to the memory file
+
+### Project Tools (project.py)
+
+Project discovery and context management:
+- `discover_projects`: Find projects in a directory
+- `use_project`: Set current project and load its context
+- `get_current_project`: Get information about current project
+- `create_project_memo`: Create a memo file for current project
+- `search_for_project`: Find projects by name
 
 ## Implementation Notes
 

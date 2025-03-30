@@ -43,6 +43,7 @@ def main():
         print("- Filesystem tools: read_file, write_file, list_directory, create_directory, etc.", file=sys.stderr)
         print("- Command management: block_command, unblock_command, list_blocked_commands", file=sys.stderr)
         print("- Memo tools: read_memo, write_memo, append_memo", file=sys.stderr)
+        print("- Project tools: discover_projects, use_project, get_current_project, create_project_memo", file=sys.stderr)
         
         # Run the MCP server
         # The run() method automatically handles all of the MCP protocol
