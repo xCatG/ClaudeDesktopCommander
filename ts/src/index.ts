@@ -1,24 +1,55 @@
 #!/usr/bin/env node
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { FilteredStdioServerTransport } from './custom-stdio.js';
 import { server } from './server.js';
 import { commandManager } from './command-manager.js';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { platform } from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const isWindows = platform() === 'win32';
+
+// Helper function to properly convert file paths to URLs, especially for Windows
+function createFileURL(filePath: string): URL {
+  if (isWindows) {
+    // Ensure path uses forward slashes for URL format
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    // Ensure path has proper file:// prefix
+    if (normalizedPath.startsWith('/')) {
+      return new URL(`file://${normalizedPath}`);
+    } else {
+      return new URL(`file:///${normalizedPath}`);
+    }
+  } else {
+    // For non-Windows, we can use the built-in function
+    return pathToFileURL(filePath);
+  }
+}
 
 async function runSetup() {
-  const setupScript = join(__dirname, 'setup-claude-server.js');
-  const { default: setupModule } = await import(setupScript);
-  if (typeof setupModule === 'function') {
-    await setupModule();
+  try {
+    // Fix for Windows ESM path issue
+    const setupScriptPath = join(__dirname, 'setup-claude-server.js');
+    const setupScriptUrl = createFileURL(setupScriptPath);
+    
+    // Now import using the URL format
+    const { default: setupModule } = await import(setupScriptUrl.href);
+    if (typeof setupModule === 'function') {
+      await setupModule();
+    }
+  } catch (error) {
+    console.error('Error running setup:', error);
+    process.exit(1);
   }
 }
 
 async function runServer() {
   try {
+    const transport = new FilteredStdioServerTransport();
+
+    console.log("start")
     // Check if first argument is "setup"
     if (process.argv[2] === 'setup') {
       await runSetup();
@@ -28,16 +59,32 @@ async function runServer() {
     // Handle uncaught exceptions
     process.on('uncaughtException', async (error) => {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // If this is a JSON parsing error, log it to stderr but don't crash
+      if (errorMessage.includes('JSON') && errorMessage.includes('Unexpected token')) {
+        process.stderr.write(`[desktop-commander] JSON parsing error: ${errorMessage}\n`);
+        return; // Don't exit on JSON parsing errors
+      }
+      
+      process.stderr.write(`[desktop-commander] Uncaught exception: ${errorMessage}\n`);
       process.exit(1);
     });
 
     // Handle unhandled rejections
     process.on('unhandledRejection', async (reason) => {
       const errorMessage = reason instanceof Error ? reason.message : String(reason);
+      
+      // If this is a JSON parsing error, log it to stderr but don't crash
+      if (errorMessage.includes('JSON') && errorMessage.includes('Unexpected token')) {
+        process.stderr.write(`[desktop-commander] JSON parsing rejection: ${errorMessage}\n`);
+        return; // Don't exit on JSON parsing errors
+      }
+      
+      process.stderr.write(`[desktop-commander] Unhandled rejection: ${errorMessage}\n`);
       process.exit(1);
     });
 
-    const transport = new StdioServerTransport();
+
     
     // Load blocked commands from config file
     await commandManager.loadBlockedCommands();
