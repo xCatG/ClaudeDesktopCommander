@@ -15,8 +15,8 @@ from desktop_commander.mcp_command_manager import command_manager, register_comm
 from desktop_commander.tools.terminal import register_tools as register_terminal_tools
 from desktop_commander.tools.process import register_tools as register_process_tools
 from desktop_commander.tools.filesystem import register_tools as register_filesystem_tools
-from desktop_commander.tools.memo import register_tools as register_memo_tools
 from desktop_commander.tools.project import register_tools as register_project_tools
+from desktop_commander.tools.json_memo_tools import register_tools as register_json_memo_tools
 
 # Define our MCP server
 mcp = FastMCP("Desktop Commander")
@@ -28,8 +28,8 @@ register_command_tools(mcp, command_manager)
 register_terminal_tools(mcp, command_manager)
 register_process_tools(mcp)
 register_filesystem_tools(mcp)
-register_memo_tools(mcp)
 register_project_tools(mcp)
+register_json_memo_tools(mcp)
 
 # Print initialization message
 print(f"Desktop Commander MCP Server initialized", file=sys.stderr)

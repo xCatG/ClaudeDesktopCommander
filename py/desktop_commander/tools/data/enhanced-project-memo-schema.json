@@ -1,0 +1,324 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Project Memo Schema",
+    "description": "Schema for structured project memo used by Claude Desktop Commander",
+    "type": "object",
+    "required": ["project", "currentStatus", "actionItems", "knowledgeBase", "changeLog"],
+    "properties": {
+      "project": {
+        "type": "object",
+        "description": "Basic project information",
+        "required": ["name", "overview"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the project"
+          },
+          "overview": {
+            "type": "array",
+            "description": "Key points about the project, its purpose, and main technologies",
+            "items": {
+              "type": "string"
+            }
+          },
+          "repositoryUrl": {
+            "type": "string",
+            "description": "URL to the project repository"
+          }
+        }
+      },
+      "currentStatus": {
+        "type": "object",
+        "description": "The current state of the project",
+        "required": ["branch", "highlights"],
+        "properties": {
+          "branch": {
+            "type": "string",
+            "description": "Current active branch"
+          },
+          "highlights": {
+            "type": "array",
+            "description": "Notable recent changes and current work",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lastUpdated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the status was last updated"
+          }
+        }
+      },
+      "actionItems": {
+        "type": "object",
+        "description": "Tasks and their status",
+        "required": ["todo", "inProgress", "blocked", "completed"],
+        "properties": {
+          "todo": {
+            "type": "array",
+            "description": "Tasks that need to be done",
+            "items": {
+              "type": "object",
+              "required": ["task", "priority"],
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "description": "Description of the task"
+                },
+                "priority": {
+                  "type": "string",
+                  "description": "Task priority",
+                  "enum": ["High", "Medium", "Low"]
+                },
+                "category": {
+                  "type": "string",
+                  "description": "Optional categorization of the task"
+                }
+              }
+            }
+          },
+          "inProgress": {
+            "type": "array",
+            "description": "Tasks currently being worked on",
+            "items": {
+              "type": "object",
+              "required": ["task", "startDate"],
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "description": "Description of the task"
+                },
+                "startDate": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "When work began on this task"
+                },
+                "assignee": {
+                  "type": "string",
+                  "description": "Who is working on this task"
+                }
+              }
+            }
+          },
+          "blocked": {
+            "type": "array",
+            "description": "Tasks that are blocked",
+            "items": {
+              "type": "object",
+              "required": ["task", "reason"],
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "description": "Description of the task"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why the task is blocked"
+                },
+                "blockedBy": {
+                  "type": "string",
+                  "description": "Reference to blocking task or dependency"
+                }
+              }
+            }
+          },
+          "completed": {
+            "type": "array",
+            "description": "Recently completed tasks",
+            "items": {
+              "type": "object",
+              "required": ["task", "completionDate"],
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "description": "Description of the task"
+                },
+                "completionDate": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "When the task was completed"
+                }
+              }
+            }
+          }
+        }
+      },
+      "knowledgeBase": {
+        "type": "object",
+        "description": "Project-specific knowledge and documentation",
+        "properties": {
+          "implementation": {
+            "type": "array",
+            "description": "Technical details about implementation",
+            "items": {
+              "type": "string"
+            }
+          },
+          "configuration": {
+            "type": "array",
+            "description": "Information about configuration",
+            "items": {
+              "type": "string"
+            }
+          },
+          "environment": {
+            "type": "array",
+            "description": "Development environment details",
+            "items": {
+              "type": "string"
+            }
+          },
+          "architectureDecisions": {
+            "type": "array",
+            "description": "Architecture decisions and rationale",
+            "items": {
+              "type": "object",
+              "required": ["title", "description", "date"],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Title of the decision"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Detailed description of the decision"
+                },
+                "date": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "When the decision was made"
+                },
+                "alternatives": {
+                  "type": "array",
+                  "description": "Alternatives that were considered",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "terminology": {
+            "type": "object",
+            "description": "Project-specific terms and definitions",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "fileIndex": {
+        "type": "object",
+        "description": "Index of important project files",
+        "additionalProperties": {
+          "type": "object",
+          "required": ["path", "description"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Relative path to the file"
+            },
+            "description": {
+              "type": "string",
+              "description": "Description of the file's purpose"
+            },
+            "category": {
+              "type": "string",
+              "description": "File category (e.g., Core, Utils, Tests)"
+            },
+            "lastModified": {
+              "type": "string",
+              "format": "date-time",
+              "description": "When the file was last modified"
+            }
+          }
+        }
+      },
+      "changeLog": {
+        "type": "array",
+        "description": "Record of changes to the project",
+        "items": {
+          "type": "object",
+          "required": ["date", "changes"],
+          "properties": {
+            "date": {
+              "type": "string",
+              "format": "date",
+              "description": "Date of the changes"
+            },
+            "version": {
+              "type": "string",
+              "description": "Optional version number"
+            },
+            "changes": {
+              "type": "array",
+              "description": "List of changes made",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "implementationPlans": {
+        "type": "object",
+        "description": "Detailed implementation plans for project components",
+        "additionalProperties": {
+          "type": "object",
+          "required": ["objective", "steps", "status"],
+          "properties": {
+            "objective": {
+              "type": "string",
+              "description": "Main objective of the plan"
+            },
+            "steps": {
+              "type": "array",
+              "description": "Implementation steps",
+              "items": {
+                "type": "string"
+              }
+            },
+            "testing": {
+              "type": "array",
+              "description": "Testing approach",
+              "items": {
+                "type": "string"
+              }
+            },
+            "completionCriteria": {
+              "type": "array",
+              "description": "Criteria to consider the plan complete",
+              "items": {
+                "type": "string"
+              }
+            },
+            "status": {
+              "type": "string",
+              "description": "Current status of the plan",
+              "enum": ["Not Started", "In Progress", "Completed", "Blocked"]
+            }
+          }
+        }
+      },
+      "metaData": {
+        "type": "object",
+        "description": "Metadata about the memo itself",
+        "properties": {
+          "lastUpdated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the memo was last updated"
+          },
+          "version": {
+            "type": "string",
+            "description": "Schema version for the memo"
+          },
+          "schemaUrl": {
+            "type": "string",
+            "description": "URL to the schema definition"
+          }
+        }
+      }
+    }
+  }

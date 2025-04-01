@@ -405,60 +405,78 @@ def register_tools(mcp):
             return f"Error searching code: {str(e)}"
 
     @mcp.tool()
-    async def edit_block(block_content: str) -> str:
+    async def edit_block(content_json: str) -> str:
         """
-        Apply surgical text replacements to files. Format: 
-        filepath
-        <<<<<<< SEARCH
-        content to find
-        =======
-        new content
-        >>>>>>> REPLACE
+        Apply a surgical text replacement to a SINGLE FILE using a JSON structure.
+        
+        IMPORTANT: This tool edits ONE FILE at a time only. It cannot edit directories.
+        
+        The JSON input must have this exact structure:
+        {
+          "file": "path/to/file.txt",
+          "search": "exact text to find",
+          "replace": "new text to replace with"
+        }
+        
+        Where:
+        - "file": MUST be a path to a specific file (not a directory)
+        - "search": The EXACT text block to find in the file (including whitespace/indentation)
+        - "replace": The new text that will replace the search text
+        
+        The tool finds the exact text specified in "search" and replaces it with the text in "replace".
+        Only the first occurrence of the search text will be replaced.
+        
+        Example valid input:
+        {
+          "file": "/home/user/myproject/src/file.js",
+          "search": "function hello() {\n  console.log('hello');\n}",
+          "replace": "function hello() {\n  console.log('hello world');\n}"
+        }
+        
+        Returns:
+            Success message or detailed error information
         """
         try:
-            # Parse the edit block
-            lines = block_content.split('\n')
+            # Parse JSON input
+            try:
+                edit = json.loads(content_json)
+            except json.JSONDecodeError as e:
+                return f"Error parsing JSON input: {str(e)}"
             
-            # First line should be the file path
-            file_path = lines[0].strip()
+            # Extract edit parameters
+            file_path = edit.get('file')
+            search_text = edit.get('search')
+            replace_text = edit.get('replace')
             
-            # Find the markers
-            search_start = -1
-            divider = -1
-            replace_end = -1
-            
-            for i, line in enumerate(lines):
-                if line.strip() == '<<<<<<< SEARCH':
-                    search_start = i
-                elif line.strip() == '=======':
-                    divider = i
-                elif line.strip() == '>>>>>>> REPLACE':
-                    replace_end = i
-            
-            if search_start == -1 or divider == -1 or replace_end == -1:
-                return 'Invalid edit block format - missing markers'
-            
-            # Extract search and replace content
-            search = '\n'.join(lines[search_start + 1:divider])
-            replace = '\n'.join(lines[divider + 1:replace_end])
+            # Validate parameters
+            if not all([file_path, search_text is not None, replace_text is not None]):
+                return "Error: Missing required fields in JSON. Must include 'file', 'search', and 'replace'."
             
             # Validate file path
             valid_path = _validate_path(file_path)
             
+            # Check if path is a directory
+            if os.path.isdir(valid_path):
+                return f"Error: {valid_path} is a directory, not a file. This tool can only edit individual files."
+            
+            # Check if file exists
+            if not os.path.isfile(valid_path):
+                return f"Error: File {valid_path} does not exist"
+            
             # Read the file
-            with open(valid_path, "r", encoding="utf-8") as f:
+            with open(valid_path, "r", encoding="utf-8", errors='replace') as f:
                 content = f.read()
             
-            # Find first occurrence
-            search_index = content.find(search)
+            # Find occurrence
+            search_index = content.find(search_text)
             if search_index == -1:
-                return f"Search content not found in {file_path}"
+                return f"Error: Search content not found in {file_path}"
             
             # Replace content
             new_content = (
                 content[:search_index] + 
-                replace + 
-                content[search_index + len(search):]
+                replace_text + 
+                content[search_index + len(search_text):]
             )
             
             # Write the file
@@ -466,5 +484,6 @@ def register_tools(mcp):
                 f.write(new_content)
             
             return f"Successfully applied edit to {file_path}"
+            
         except Exception as e:
             return f"Error applying edit: {str(e)}"

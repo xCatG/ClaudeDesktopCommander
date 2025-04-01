@@ -12,6 +12,14 @@ import json
 import glob
 from typing import List, Dict, Optional
 from pathlib import Path
+from datetime import datetime
+
+# Import the structured memo creator
+try:
+    from scripts.create_structured_memo import create_structured_memo as create_structured_json_memo
+except ImportError:
+    # Fallback for when the script is imported from different contexts
+    create_structured_json_memo = None
 
 # Load configuration
 def load_config():
@@ -366,6 +374,55 @@ Creating a project memo would help maintain knowledge about this project across 
             return f"Created project memo for {current_project['name']}"
         except Exception as e:
             return f"Error creating project memo: {str(e)}"
+            
+    @mcp.tool()
+    def create_structured_project_memo(output_format: str = "json") -> str:
+        """
+        Create a structured project memo in JSON format according to the enhanced schema.
+        
+        Args:
+            output_format: Format of the output file ("json" or "markdown")
+            
+        Returns:
+            Success message or error
+        """
+        global current_project
+        if not current_project["path"]:
+            return "No active project. Use discover_projects and use_project to select a project."
+            
+        try:
+            project_path = current_project["path"]
+            
+            if output_format.lower() == "json":
+                # Use the structured JSON memo creator
+                if not create_structured_json_memo:
+                    return "Error: Structured memo creator module not available"
+                    
+                json_memo_path = os.path.join(project_path, "claude_memo.json")
+                result_path = create_structured_json_memo(project_path, json_memo_path)
+                
+                # Also update the current project info
+                current_project["has_memo"] = True
+                current_project["memo_path"] = os.path.join(project_path, "claude_memo.md")
+                
+                return f"Created structured JSON memo at {result_path}"
+            elif output_format.lower() == "markdown":
+                # Use the explore_project function to generate a markdown memo
+                memo_content = explore_project(project_path)
+                memo_path = os.path.join(project_path, "claude_memo.md")
+                
+                with open(memo_path, "w") as f:
+                    f.write(memo_content)
+                
+                # Update current project info
+                current_project["has_memo"] = True
+                current_project["memo_path"] = memo_path
+                
+                return f"Created structured markdown memo at {memo_path}"
+            else:
+                return f"Unsupported output format: {output_format}. Use 'json' or 'markdown'."
+        except Exception as e:
+            return f"Error creating structured project memo: {str(e)}"
             
     @mcp.tool()
     def index_file(file_path: str, description: str, category: str = "Uncategorized") -> str:
