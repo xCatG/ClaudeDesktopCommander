@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from typing import List
 
@@ -405,52 +406,37 @@ def register_tools(mcp):
             return f"Error searching code: {str(e)}"
 
     @mcp.tool()
-    async def edit_block(content_json: str) -> str:
+    async def edit_block(file: str, search: str, replace: str) -> str:
         """
-        Apply a surgical text replacement to a SINGLE FILE using a JSON structure.
+        Apply a surgical text replacement to a SINGLE FILE.
         
         IMPORTANT: This tool edits ONE FILE at a time only. It cannot edit directories.
         
-        The JSON input must have this exact structure:
-        {
-          "file": "path/to/file.txt",
-          "search": "exact text to find",
-          "replace": "new text to replace with"
-        }
-        
-        Where:
-        - "file": MUST be a path to a specific file (not a directory)
-        - "search": The EXACT text block to find in the file (including whitespace/indentation)
-        - "replace": The new text that will replace the search text
+        Args:
+            file: Path to the file to edit
+            search: The EXACT text block to find in the file (including whitespace/indentation)
+            replace: The new text that will replace the search text
         
         The tool finds the exact text specified in "search" and replaces it with the text in "replace".
         Only the first occurrence of the search text will be replaced.
         
-        Example valid input:
-        {
-          "file": "/home/user/myproject/src/file.js",
-          "search": "function hello() {\n  console.log('hello');\n}",
-          "replace": "function hello() {\n  console.log('hello world');\n}"
-        }
+        Example:
+            file: "/home/user/myproject/src/file.js"
+            search: "function hello() {\n  console.log('hello');\n}"
+            replace: "function hello() {\n  console.log('hello world');\n}"
         
         Returns:
             Success message or detailed error information
         """
         try:
-            # Parse JSON input
-            try:
-                edit = json.loads(content_json)
-            except json.JSONDecodeError as e:
-                return f"Error parsing JSON input: {str(e)}"
-            
             # Extract edit parameters
-            file_path = edit.get('file')
-            search_text = edit.get('search')
-            replace_text = edit.get('replace')
+            file_path = file
+            search_text = search
+            replace_text = replace
             
             # Validate parameters
             if not all([file_path, search_text is not None, replace_text is not None]):
-                return "Error: Missing required fields in JSON. Must include 'file', 'search', and 'replace'."
+                return "Error: Missing required parameters. Must include 'file', 'search', and 'replace'."
             
             # Validate file path
             valid_path = _validate_path(file_path)
