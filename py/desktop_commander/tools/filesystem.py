@@ -3,6 +3,7 @@ Filesystem tools for the Desktop Commander MCP Server.
 Includes file operations, search, and path utilities.
 """
 
+import json
 import os
 import re
 import shutil
@@ -107,6 +108,10 @@ def register_tools(mcp):
         """
         Completely replace file contents. Best for large changes or when edit_block fails.
         Only works within allowed directories.
+        
+        Args:
+            path: The path where to write the file
+            content: Content to write as a string. For JSON/dict data, serialize it before passing.
         """
         try:
             # Validate path
@@ -118,6 +123,43 @@ def register_tools(mcp):
             return f"Successfully wrote to {valid_path}"
         except Exception as e:
             return f"Error writing file: {str(e)}"
+
+    @mcp.tool()
+    async def write_json_file(path: str, content_json: str) -> str:
+        """
+        Write JSON data to a file. Accepts a JSON string and properly formats it.
+        Only works within allowed directories.
+        
+        Args:
+            path: The path where to write the file
+            content_json: JSON string to write (must be valid JSON)
+            
+        Returns:
+            Success message or error
+        """
+        try:
+            # Parse and re-serialize the JSON to ensure it's valid and properly formatted
+            try:
+                # Parse the JSON string
+                parsed_json = json.loads(content_json)
+                
+                # Re-serialize with indentation
+                formatted_json = json.dumps(parsed_json, indent=2)
+            except json.JSONDecodeError as json_error:
+                print(f"Invalid JSON: {str(json_error)}", file=sys.stderr)
+                return f"Error: Invalid JSON input - {str(json_error)}"
+                
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Write the formatted JSON to file
+            with open(path, "w") as f:
+                f.write(formatted_json)
+                
+            return f"Successfully wrote JSON to {path}"
+        except Exception as e:
+            print(f"Error writing JSON file: {str(e)}", file=sys.stderr)
+            return f"Error writing JSON file: {str(e)}"
 
     @mcp.tool()
     async def list_directory(path: str) -> str:
