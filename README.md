@@ -1,6 +1,5 @@
 # Desktop Commander MCP
 
-
 [![npm downloads](https://img.shields.io/npm/dw/@wonderwhy-er/desktop-commander)](https://www.npmjs.com/package/@wonderwhy-er/desktop-commander)
 [![smithery badge](https://smithery.ai/badge/@wonderwhy-er/desktop-commander)](https://smithery.ai/server/@wonderwhy-er/desktop-commander)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg)](https://www.buymeacoffee.com/wonderwhyer)
@@ -17,9 +16,11 @@ Short version. Two key things. Terminal commands and diff based file editing.
 
 ## Table of Contents
 - [Features](#features)
+- [Implementations](#implementations)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Handling Long-Running Commands](#handling-long-running-commands)
+- [Docker Support](#docker-support)
 - [Work in Progress and TODOs](#work-in-progress-and-todos)
 - [Media links](#media)
 - [Testimonials](#testimonials)
@@ -27,7 +28,7 @@ Short version. Two key things. Terminal commands and diff based file editing.
 - [Contributing](#contributing)
 - [License](#license)
 
-This is server that allows Claude desktop app to execute long-running terminal commands on your computer and manage processes through Model Context Protocol (MCP) + Built on top of [MCP Filesystem Server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) to provide additional search and replace file editing capabilities .
+This is a server that allows Claude desktop app to execute long-running terminal commands on your computer and manage processes through Model Context Protocol (MCP) + Built on top of [MCP Filesystem Server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) to provide additional search and replace file editing capabilities.
 
 ## Features
 
@@ -48,10 +49,22 @@ This is server that allows Claude desktop app to execute long-running terminal c
   - Pattern-based replacements
   - vscode-ripgrep based recursive code or text search in folders
 
-## Installation
-First, ensure you've downloaded and installed the [Claude Desktop app](https://claude.ai/download) and you have [npm installed](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm).
+## Implementations
 
-### Option 1: Installing via Smithery
+This repository contains two implementations of the Desktop Commander MCP:
+
+1. **TypeScript Implementation** (Original) - Located in the `/ts` directory
+2. **Python Implementation** - Located in the `/py` directory
+
+Choose the implementation that best fits your environment and preferences. Both provide the same core functionality.
+
+## Installation
+
+First, ensure you've downloaded and installed the [Claude Desktop app](https://claude.ai/download).
+
+### TypeScript Implementation
+
+#### Option 1: Installing via Smithery
 
 To install Desktop Commander for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@wonderwhy-er/desktop-commander):
 
@@ -59,7 +72,7 @@ To install Desktop Commander for Claude Desktop automatically via [Smithery](htt
 npx -y @smithery/cli install @wonderwhy-er/desktop-commander --client claude
 ```
 
-### Option 2: Install trough npx
+#### Option 2: Install through npx
 Just run this in terminal
 ```
 npx @wonderwhy-er/desktop-commander setup
@@ -72,7 +85,6 @@ Add this entry to your claude_desktop_config.json:
 - On Mac: `~/Library/Application\ Support/Claude/claude_desktop_config.json`
 - On Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 - On Linux: `~/.config/Claude/claude_desktop_config.json`
-
 ```json
 {
   "mcpServers": {
@@ -88,20 +100,32 @@ Add this entry to your claude_desktop_config.json:
 ```
 Restart Claude if running
 
-### Option 4: Checkout locally
+#### Option 4: Checkout locally
 1. Clone and build:
 ```bash
 git clone https://github.com/wonderwhy-er/ClaudeComputerCommander.git
-cd ClaudeComputerCommander
+cd ClaudeComputerCommander/ts
 npm run setup
 ```
 Restart Claude if running
 
-The setup command will:
-- Install dependencies
-- Build the server
-- Configure Claude's desktop app
-- Add MCP servers to Claude's config if needed
+### Python Implementation
+
+#### Option 1: Install using pip
+```bash
+cd ClaudeComputerCommander/py
+pip install -e .
+python -m desktop_commander.main setup
+```
+Restart Claude if running
+
+#### Option 2: Run directly from source
+```bash
+cd ClaudeComputerCommander/py
+pip install -r requirements.txt
+python -m desktop_commander.main setup
+```
+Restart Claude if running
 
 ## Usage
 
@@ -157,6 +181,30 @@ For commands that may take a while:
 3. Use `read_output` with PID to get new output
 4. Use `force_terminate` to stop if needed
 
+## Docker Support
+
+Both implementations can be run in Docker containers.
+
+### TypeScript Docker Support
+
+The TypeScript implementation includes a Dockerfile in the `/ts` directory:
+
+```bash
+cd ts
+docker build -t desktop-commander-ts .
+docker run -it --rm desktop-commander-ts
+```
+
+### Python Docker Support
+
+To run the Python implementation in Docker:
+
+```bash
+cd py
+docker build -t desktop-commander-py .
+docker run -it --rm desktop-commander-py
+```
+
 ## Model Context Protocol Integration
 
 This project extends the MCP Filesystem Server to enable:
@@ -171,6 +219,7 @@ Created as part of exploring Claude MCPs: https://youtube.com/live/TlbjFDbl5Us
 ## DONE
 - **28-03-2025 Fixed "Watching /" JSON error** - Implemented custom stdio transport to handle non-JSON messages and prevent server crashes
 - **25-03-2025 Better code search** ([merged](https://github.com/wonderwhy-er/ClaudeDesktopCommander/pull/17)) - Enhanced code exploration with context-aware results
+- **Added Python implementation** - Alternative implementation for Python environments
 
 ## Work in Progress and TODOs
 
@@ -232,7 +281,7 @@ If you find this project useful, please consider giving it a ⭐ star on GitHub!
 
 We welcome contributions from the community! Whether you've found a bug, have a feature request, or want to contribute code, here's how you can help:
 
-- **Found a bug?** Open an issue at [github.com/wonderwhy-er/ClaudeComputerCommander/issues](https://github.com/wonderwhy-er/ClaudeComputerCommander/issues)
+- **Found a bug?** Open an issue at [GitHub Issues](https://github.com/wonderwhy-er/ClaudeComputerCommander/issues)
 - **Have a feature idea?** Submit a feature request in the issues section
 - **Want to contribute code?** Fork the repository, create a branch, and submit a pull request
 - **Questions or discussions?** Start a discussion in the GitHub Discussions tab
