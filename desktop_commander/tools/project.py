@@ -61,13 +61,13 @@ def register_tools(mcp):
     @mcp.tool()
     def explore_project(project_path: str = None) -> str:
         """
-        Explore a project and generate a high-level understanding.
+        Provides instructions for an agent to explore a project and store knowledge.
         
         Args:
             project_path: Optional path to the project (uses current project if not specified)
             
         Returns:
-            Summary of project exploration and analysis
+            Instructions for project exploration
         """
         try:
             # Use current project if no path specified
@@ -83,145 +83,133 @@ def register_tools(mcp):
             # Get project info
             project_info = _check_if_project(project_path) or {}
             project_name = project_info.get("name") or os.path.basename(project_path)
+            project_type = project_info.get("type")
             
-            # Create project analysis
-            analysis = {}
+            # Get type-specific file suggestions
+            type_specific_files = _get_type_specific_files(project_type, project_path)
             
-            # Check for repository information
-            git_path = os.path.join(project_path, ".git")
-            has_git = os.path.exists(git_path)
-            analysis["has_git"] = has_git
-            
-            # Check for common project files
-            common_files = {
-                "package.json": "Node.js/JavaScript",
-                "setup.py": "Python",
-                "requirements.txt": "Python",
-                "Cargo.toml": "Rust",
-                "pom.xml": "Java/Maven",
-                "build.gradle": "Java/Gradle",
-                "CMakeLists.txt": "C++/CMake",
-                "Makefile": "C/C++",
-                "Dockerfile": "Docker",
-                "docker-compose.yml": "Docker Compose",
-                "go.mod": "Go",
-                "mix.exs": "Elixir",
-                "Gemfile": "Ruby"
-            }
-            
-            detected_types = []
-            for file, tech_type in common_files.items():
-                if os.path.exists(os.path.join(project_path, file)):
-                    detected_types.append(tech_type)
-            
-            analysis["detected_types"] = detected_types
-            
-            # Collect directory structure information
-            dirs = []
-            files_by_ext = {}
-            
-            for root, directories, files in os.walk(project_path, topdown=True):
-                # Skip git and virtual environment directories
-                directories[:] = [d for d in directories if d not in [".git", "node_modules", "__pycache__", "venv", ".venv", "env", ".env"]]
-                
-                rel_path = os.path.relpath(root, project_path)
-                if rel_path != ".":
-                    dirs.append(rel_path)
-                
-                # Count file extensions
-                for file in files:
-                    _, ext = os.path.splitext(file)
-                    if ext:
-                        ext = ext.lower()
-                        files_by_ext[ext] = files_by_ext.get(ext, 0) + 1
-            
-            analysis["directories"] = dirs[:10]  # Limit to top 10 directories
-            analysis["file_types"] = {k: v for k, v in sorted(files_by_ext.items(), key=lambda item: item[1], reverse=True)[:10]}
-            
-            # Generate summary text
-            summary = [f"# Project Analysis: {project_name}"]
-            
-            # Project type
-            if detected_types:
-                summary.append("\n## Project Type")
-                summary.append(f"This appears to be a {', '.join(detected_types)} project.")
-            
-            # Repository info
-            summary.append("\n## Repository")
-            if has_git:
-                summary.append("This project is a Git repository.")
-            else:
-                summary.append("This project is not a Git repository.")
-            
-            # Structure summary
-            summary.append("\n## Structure Overview")
-            if dirs:
-                summary.append("Key directories:")
-                for d in analysis["directories"][:5]:
-                    summary.append(f"- {d}")
-            
-            # File types
-            if files_by_ext:
-                summary.append("\nFile types:")
-                for ext, count in analysis["file_types"].items():
-                    summary.append(f"- {ext}: {count} files")
-            
-            # Create memo suggestion
-            memo_suggestion = "\n## Suggested Memo Content\n"
-            memo_suggestion += f"""
-# Project: {project_name}
+            # Instructions for the agent
+            instructions = f"""# Project Exploration Instructions: {project_name}
 
-## Overview
-- {project_name} is a {'/'.join(detected_types[:2]) if detected_types else 'software'} project
-- {len(analysis.get('directories', []))} directories and multiple file types found
-- Main technologies: {', '.join(detected_types) if detected_types else 'Unknown'}
+I'll assist you in exploring this project. Here's what you should do:
 
-## Current Status
-- Initial project exploration completed on {datetime.now().strftime('%Y-%m-%d')}
-- Further analysis needed for specific functionality
+1. **Basic Project Analysis**:
+   - Examine key files like `README.md`, `package.json`, `setup.py`, etc.
+   - Look for documentation in `/docs` or similar directories
+   - Identify main technologies and frameworks used
 
-## Action Items
-### TODO
-- [ ] High: Review project documentation
-- [ ] Medium: Identify key components
-- [ ] Medium: Document project architecture
+{type_specific_files}
 
-## Knowledge Base
-### Implementation
-- {', '.join(detected_types) if detected_types else 'Unknown'} project structure
-- Key directories: {', '.join(analysis.get('directories', [])[:3]) if analysis.get('directories') else 'None identified'}
+2. **Code Structure Analysis**:
+   - Identify core directories (src, lib, app, etc.)
+   - Map key components and their relationships
+   - Determine entry points and main modules
+
+3. **Store Project Knowledge**:
+   After exploration, capture your knowledge by creating a structured knowledge graph:
+   ```json
+   {{
+     "project_name": "{project_name}",
+     "entities": [
+       {{"id": "1", "name": "Component1", "entityType": "component", "description": "..."}},
+       {{"id": "2", "name": "Component2", "entityType": "module", "description": "..."}}
+     ],
+     "relations": [
+       {{"source": "1", "target": "2", "relationship": "depends_on", "description": "..."}}
+     ],
+     "file_exploration_tips": [
+       {{"project_type": "{project_type}", "key_files": ["file1.py", "file2.py"], "description": "These files are important entry points"}}
+     ]
+   }}
+   ```
+
+4. **Save Knowledge**:
+   Use `export_project_to_knowledge_graph()` with your JSON structure to save this knowledge
+
+5. **Contribute Exploration Tips**:
+   Include any file exploration tips you discover in the knowledge graph's `file_exploration_tips` section. These tips will help future explorations of similar projects.
+
+Once saved, the knowledge will be accessible via:
+- `knowledge://{project_name}/graph`
+- `knowledge://{project_name}/entities`
+- Other knowledge resources
+
+You can also use `sync_memory_to_project_knowledge("{project_name}")` if you've already stored this information in memory.
+
+Would you like me to start exploring the project now?
 """
-            
-            # Combine everything
-            result = "\n".join(summary) + "\n\n" + memo_suggestion
-            
-            # Add memory persistence instructions
-            memory_instructions = """
-## Memory Integration Instructions
-
-After exploring this project, I recommend:
-
-1. Using the memory tools to create entities in the knowledge graph:
-   - Create a project entity for this codebase (use create_entities tool)
-   - Add entities for major components identified above
-   - Define relations between these entities
-
-2. Syncing with project knowledge graph:
-   - Use sync_memory_to_project_knowledge("{project_name}") to preserve this knowledge
-   - Or use export_project_to_knowledge_graph() with structured knowledge
-
-3. For future reference:
-   - Use memory://graph to access the complete knowledge graph
-   - Use knowledge://{project_name}/graph to access project-specific knowledge
-   - Search with memory://search/{{query}} for specific information
-
-This will ensure your understanding of this project persists across sessions.
-"""
-            memory_instructions = memory_instructions.format(project_name=project_name)
-            
-            return result + "\n\n" + memory_instructions
+            return instructions
         except Exception as e:
-            return f"Error exploring project: {str(e)}"
+            return f"Error preparing project exploration: {str(e)}"
+            
+    def _get_type_specific_files(project_type, project_path):
+        """
+        Get type-specific file suggestions based on project type.
+        
+        Args:
+            project_type: Type of project (python, node, rust, etc.)
+            project_path: Path to the project
+            
+        Returns:
+            Type-specific file suggestions
+        """
+        # Initialize suggestions
+        suggestions = "\n   **Key Files to Examine First**:"
+        
+        # Get file suggestions based on project type
+        if project_type == "python":
+            suggestions += """
+   - Look for `setup.py` or `pyproject.toml` for project configuration
+   - Check for `requirements.txt` or `Pipfile` for dependencies
+   - Look for `__main__.py` files as entry points
+   - Examine any files named like `app.py`, `main.py`, or `run.py`
+   - If a Django project, check for `settings.py`, `urls.py`, and `models.py`
+   - If a Flask project, look for an `app` variable or `create_app()` function"""
+        elif project_type == "node":
+            suggestions += """
+   - Examine `package.json` for dependencies and scripts
+   - Check for configuration files like `.babelrc`, `tsconfig.json`, `.eslintrc`
+   - Look for entry points in `index.js`, `app.js`, or files referenced in package.json "main" field
+   - Review `webpack.config.js` or similar build configs
+   - If a React project, look for components in `src/components` or similar directories"""
+        elif project_type == "rust":
+            suggestions += """
+   - Check `Cargo.toml` for dependencies and project metadata
+   - Look at `src/main.rs` or `src/lib.rs` for entry points
+   - Review `build.rs` if it exists for build configurations
+   - Examine `.cargo/config.toml` for toolchain configuration"""
+        elif project_type == "java":
+            suggestions += """
+   - Examine `pom.xml` (Maven) or `build.gradle` (Gradle) for dependencies
+   - Look for main application classes that have a `main()` method
+   - Review `application.properties` or `application.yml` for Spring Boot projects
+   - Check for `src/main/java` and `src/test/java` directories"""
+        elif project_type == "git":
+            # Generic suggestions for git repos without specific project type indicators
+            suggestions += """
+   - Look for README.md or similar documentation
+   - Check for license files
+   - Examine any Dockerfile or docker-compose.yml
+   - Look for CI/CD configuration files (.github/workflows, .gitlab-ci.yml, etc.)
+   - Find entry point files like index.js, main.py, etc. in root or src directories"""
+        else:
+            # Generic suggestions
+            suggestions += """
+   - Look for README.md or similar documentation files
+   - Check for configuration files in the project root
+   - Examine any build or package files
+   - Look for source code directories (src, lib, app, etc.)
+   - Try to identify main entry point files"""
+           
+        # Check for file existence and add actual files found
+        actual_files = []
+        if os.path.exists(os.path.join(project_path, "README.md")):
+            actual_files.append("README.md")
+        
+        if actual_files:
+            suggestions += f"\n   - Found key files: {', '.join(actual_files)}"
+            
+        return suggestions
     
     @mcp.tool()
     def discover_projects(base_dir: Optional[str] = None) -> str:
@@ -299,7 +287,15 @@ This will ensure your understanding of this project persists across sessions.
             Project context summary if available, otherwise basic project info
         """
         try:
-            project_path = os.path.abspath(project_path)
+            base_dir = get_project_base_dir()
+            base_dir = os.path.abspath(base_dir)
+            if not os.path.exists(base_dir):
+                return f"Base directory not found: {base_dir}"
+            # If project_path contains multiple parts, use the last part
+            project_name = os.path.basename(os.path.normpath(project_path))
+
+            # Form the absolute path by appending the project name to base_dir
+            project_path = os.path.join(base_dir, project_name)
             if not os.path.exists(project_path):
                 return f"Project not found: {project_path}"
                 
@@ -394,17 +390,27 @@ You can use explore_project() to analyze the project structure."""
         """
         Export project knowledge to the knowledge graph storage.
         
-        This tool takes structured knowledge about a project in JSON format
+        This tool takes structured knowledge about a project as a JSON STRING (not a Python object/dictionary)
         and stores it in the knowledge graph for future reference.
         
         Args:
-            project_knowledge: JSON string containing project entity and relation data
-                Expected format:
+            project_knowledge: JSON string containing project entity and relation data. 
+                Must be a properly formatted JSON string (use json.dumps() to convert Python objects).
+                Expected format (as a string):
                 {
                   "project_name": "MyProject",
                   "entities": [...],
                   "relations": [...]
                 }
+                
+        Example usage:
+            knowledge_object = {
+                "project_name": "MyProject",
+                "entities": [...],
+                "relations": [...]
+            }
+            # Convert to JSON string before passing:
+            result = export_project_to_knowledge_graph(json.dumps(knowledge_object))
             
         Returns:
             Success or error message

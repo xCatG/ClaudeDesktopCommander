@@ -13,5 +13,6 @@
       "useradd",
       "usermod",
       "groupadd"
-    ]
+    ],
+    "project_default_path": "src"
   }
