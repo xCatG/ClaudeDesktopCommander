@@ -55,6 +55,9 @@ current_project = {
 def register_tools(mcp):
     """Register project navigation tools with the MCP server."""
     
+    # Import the knowledge graph manager here to avoid circular imports
+    from desktop_commander.tools.knowledge_graph import graph_manager
+    
     @mcp.tool()
     def explore_project(project_path: str = None) -> str:
         """
@@ -192,7 +195,31 @@ def register_tools(mcp):
             # Combine everything
             result = "\n".join(summary) + "\n\n" + memo_suggestion
             
-            return result
+            # Add memory persistence instructions
+            memory_instructions = """
+## Memory Integration Instructions
+
+After exploring this project, I recommend:
+
+1. Using the memory tools to create entities in the knowledge graph:
+   - Create a project entity for this codebase (use create_entities tool)
+   - Add entities for major components identified above
+   - Define relations between these entities
+
+2. Syncing with project knowledge graph:
+   - Use sync_memory_to_project_knowledge("{project_name}") to preserve this knowledge
+   - Or use export_project_to_knowledge_graph() with structured knowledge
+
+3. For future reference:
+   - Use memory://graph to access the complete knowledge graph
+   - Use knowledge://{project_name}/graph to access project-specific knowledge
+   - Search with memory://search/{{query}} for specific information
+
+This will ensure your understanding of this project persists across sessions.
+"""
+            memory_instructions = memory_instructions.format(project_name=project_name)
+            
+            return result + "\n\n" + memory_instructions
         except Exception as e:
             return f"Error exploring project: {str(e)}"
     
@@ -361,6 +388,105 @@ You can use explore_project() to analyze the project structure."""
             return "\n".join(result)
         except Exception as e:
             return f"Error searching for projects: {str(e)}"
+            
+    @mcp.tool()
+    def export_project_to_knowledge_graph(project_knowledge: str) -> str:
+        """
+        Export project knowledge to the knowledge graph storage.
+        
+        This tool takes structured knowledge about a project in JSON format
+        and stores it in the knowledge graph for future reference.
+        
+        Args:
+            project_knowledge: JSON string containing project entity and relation data
+                Expected format:
+                {
+                  "project_name": "MyProject",
+                  "entities": [...],
+                  "relations": [...]
+                }
+            
+        Returns:
+            Success or error message
+        """
+        try:
+            # Access the knowledge_graph manager
+            from desktop_commander.tools.knowledge_graph import graph_manager
+            
+            # Parse the knowledge data
+            data = json.loads(project_knowledge)
+            
+            # Validate required fields
+            if "project_name" not in data:
+                return "Error: Missing required 'project_name' field in knowledge data"
+                
+            if "entities" not in data or "relations" not in data:
+                return "Error: Knowledge data must contain both 'entities' and 'relations' arrays"
+                
+            project_name = data["project_name"]
+            
+            # Extract the key fields
+            graph_data = {
+                "entities": data["entities"],
+                "relations": data["relations"],
+                "metadata": {
+                    "exported_at": datetime.now().isoformat(),
+                    "entity_count": len(data["entities"]),
+                    "relation_count": len(data["relations"])
+                }
+            }
+            
+            # Save to the knowledge graph
+            success = graph_manager.save_graph(project_name, graph_data)
+            
+            if success:
+                return f"""Successfully exported knowledge graph for project: {project_name}
+                
+Knowledge Graph Resources:
+- Complete graph: knowledge://{project_name}/graph
+- Entities only: knowledge://{project_name}/entities
+- Relations only: knowledge://{project_name}/relations
+- Entity by name: knowledge://{project_name}/entity/{{entity_name}}
+- Entities by type: knowledge://{project_name}/entity_type/{{entity_type}}"""
+            else:
+                return f"Failed to export knowledge graph for project: {project_name}"
+        except json.JSONDecodeError:
+            return "Error: Invalid JSON data provided for knowledge graph"
+        except Exception as e:
+            return f"Error exporting project to knowledge graph: {str(e)}"
+            
+    @mcp.tool()
+    def import_project_from_knowledge_graph(project_name: str) -> str:
+        """
+        Import project knowledge from the knowledge graph storage.
+        
+        Args:
+            project_name: Name of the project to import
+            
+        Returns:
+            Project knowledge as JSON string or error message
+        """
+        try:
+            # Access the knowledge_graph manager
+            from desktop_commander.tools.knowledge_graph import graph_manager
+            
+            # Load from the knowledge graph
+            graph_data = graph_manager.load_graph(project_name)
+            
+            if not graph_data:
+                return f"No knowledge graph found for project: {project_name}"
+                
+            # Format the output
+            result = {
+                "project_name": project_name,
+                "entities": graph_data.get("entities", []),
+                "relations": graph_data.get("relations", []),
+                "metadata": graph_data.get("metadata", {})
+            }
+            
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            return f"Error importing project from knowledge graph: {str(e)}"
 
     # Helper functions (not exposed as tools)
     def _check_if_project(directory: str) -> Optional[Dict]:

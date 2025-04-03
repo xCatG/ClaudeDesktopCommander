@@ -42,9 +42,10 @@ def main():
         print("- Process tools: list_processes, kill_process", file=sys.stderr)
         print("- Filesystem tools: read_file, write_file, list_directory, create_directory, etc.", file=sys.stderr)
         print("- Command management: block_command, unblock_command, list_blocked_commands", file=sys.stderr)
-        print("- Project tools: discover_projects, use_project, get_current_project, create_project_memo", file=sys.stderr)
-        print("- JSON memo tools: add_todo_item, mark_task_in_progress, complete_task, add_knowledge_entry, etc.", file=sys.stderr)
-        
+        print("- Project tools: discover_projects, use_project, get_current_project, explore_project", file=sys.stderr)
+        print("- Knowledge graph tools: save_project_knowledge, list_knowledge_graphs, get_project_knowledge", file=sys.stderr)
+        print("- Memory bridge tools: query_memory_graph, search_memory_nodes, get_memory_entities, sync_memory_to_project_knowledge", file=sys.stderr)
+
         # Run the MCP server
         # The run() method automatically handles all of the MCP protocol
         # including initialization, capability negotiation, and message handling
