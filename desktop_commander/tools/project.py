@@ -49,8 +49,7 @@ def get_project_base_dir():
 current_project = {
     "path": None,
     "name": None,
-    "memo_path": None,
-    "has_memo": False
+    "type": None
 }
 
 def register_tools(mcp):
@@ -193,16 +192,6 @@ def register_tools(mcp):
             # Combine everything
             result = "\n".join(summary) + "\n\n" + memo_suggestion
             
-            # Create a basic memo structure if there's no memo
-            if not project_info.get("has_memo"):
-                memo_path = os.path.join(project_path, "claude_memo.md")
-                try:
-                    with open(memo_path, "w") as f:
-                        f.write(memo_suggestion.strip())
-                    result += f"\n\nCreated initial memo file at: {memo_path}"
-                except Exception as e:
-                    result += f"\n\nFailed to create memo file: {str(e)}"
-            
             return result
         except Exception as e:
             return f"Error exploring project: {str(e)}"
@@ -264,9 +253,8 @@ def register_tools(mcp):
             # Format results
             result = [f"Found {len(projects)} projects in {base_dir}:"]
             for project in projects:
-                memo_status = "Has memo" if project["has_memo"] else "No memo"
                 project_type = f"Type: {project['type']}" if project.get("type") else ""
-                result.append(f"- {project['name']} ({memo_status}) {project_type} - {project['path']}")
+                result.append(f"- {project['name']} {project_type} - {project['path']}")
                 
             return "\n".join(result)
         except Exception as e:
@@ -301,20 +289,14 @@ def register_tools(mcp):
             current_project = project_info
             os.chdir(project_path)
             
-            # If there's a memo, load and return it
-            if project_info["has_memo"]:
-                memo_content = _load_memo(project_info["memo_path"])
-                return f"Switched to project: {project_info['name']}\n\nProject memo found! Reading context...\n\nProject context from memo:\n\n{memo_content}"
-            else:
-                # No memo, suggest exploration and creation
-                return f"""Switched to project: {project_info['name']}
+            # Return project info message
+            return f"""Switched to project: {project_info['name']}
 
-No project memo found. Would you like me to:
+Would you like me to:
 1. Explore the project and create an initial understanding?
-2. Create a basic memo structure for this project?
-3. Continue without a project memo?
+2. Continue with this project?
 
-Creating a project memo would help maintain knowledge about this project across conversations."""
+You can use explore_project() to analyze the project structure."""
         except Exception as e:
             return f"Error using project: {str(e)}"
     
@@ -332,44 +314,12 @@ Creating a project memo would help maintain knowledge about this project across 
             
         result = [f"Current project: {current_project['name']}"]
         result.append(f"Path: {current_project['path']}")
-        result.append(f"Has memo: {current_project['has_memo']}")
         
         if current_project.get("type"):
             result.append(f"Type: {current_project['type']}")
             
-        if current_project["has_memo"]:
-            result.append("\nUse read_memo() to view the full project context.")
-            
         return "\n".join(result)
     
-    @mcp.tool()
-    def create_project_memo(content: str) -> str:
-        """
-        Create a memo file for the current project with the specified content.
-        
-        Args:
-            content: Content to write to the memo file
-            
-        Returns:
-            Success message or error
-        """
-        global current_project
-        if not current_project["path"]:
-            return "No active project. Use discover_projects and use_project to select a project."
-            
-        try:
-            memo_path = os.path.join(current_project["path"], "claude_memo.md")
-            with open(memo_path, "w") as f:
-                f.write(content)
-                
-            # Update current project info
-            current_project["has_memo"] = True
-            current_project["memo_path"] = memo_path
-            
-            return f"Created project memo for {current_project['name']}"
-        except Exception as e:
-            return f"Error creating project memo: {str(e)}"
-            
     @mcp.tool()
     def search_for_project(name: str, base_dir: Optional[str] = None) -> str:
         """
@@ -404,9 +354,8 @@ Creating a project memo would help maintain knowledge about this project across 
             # Format results
             result = [f"Found {len(matches)} projects matching '{name}':"]
             for project in matches:
-                memo_status = "Has memo" if project["has_memo"] else "No memo"
                 project_type = f"Type: {project['type']}" if project.get("type") else ""
-                result.append(f"- {project['name']} ({memo_status}) {project_type} - {project['path']}")
+                result.append(f"- {project['name']} {project_type} - {project['path']}")
                 result.append(f"  Use project with: use_project(\"{project['path']}\")")
                 
             return "\n".join(result)
@@ -425,16 +374,8 @@ Creating a project memo would help maintain knowledge about this project across 
         project_info = {
             "name": dir_name,
             "path": directory,
-            "memo_path": None,
-            "has_memo": False,
             "type": None
         }
-        
-        # Check for memo file
-        memo_path = os.path.join(directory, "claude_memo.md")
-        if os.path.exists(memo_path):
-            project_info["memo_path"] = memo_path
-            project_info["has_memo"] = True
         
         # Check for project indicators
         if os.path.exists(os.path.join(directory, ".git")):
@@ -457,10 +398,6 @@ Creating a project memo would help maintain knowledge about this project across 
             project_info["type"] = "rust"
             return project_info
             
-        # If it has a memo file but no other indicators, still consider it a project
-        if project_info["has_memo"]:
-            return project_info
-            
         # Look for common project directories
         common_dirs = ["src", "lib", "app", "source"]
         for common_dir in common_dirs:
@@ -470,10 +407,3 @@ Creating a project memo would help maintain knowledge about this project across 
         # Not enough evidence this is a project
         return None
         
-    def _load_memo(memo_path: str) -> str:
-        """Load memo content from file."""
-        try:
-            with open(memo_path, "r") as f:
-                return f.read()
-        except Exception as e:
-            return f"Error loading memo: {str(e)}"
