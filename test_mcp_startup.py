@@ -14,7 +14,6 @@ def test_import_modules():
     modules_to_test = [
         "desktop_commander.mcp_server",
         "desktop_commander.mcp_implementation",
-        "desktop_commander.tools.json_memo_tools",
         "desktop_commander.tools.filesystem",
         "desktop_commander.tools.process",
         "desktop_commander.tools.terminal",
