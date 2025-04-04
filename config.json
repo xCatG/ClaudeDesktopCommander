@@ -1,18 +1,22 @@
 {
-    "blockedCommands": [
-      "format",
-      "mount",
-      "umount",
-      "mkfs",
-      "fdisk",
-      "dd",
-      "sudo",
-      "su",
-      "passwd",
-      "adduser",
-      "useradd",
-      "usermod",
-      "groupadd"
-    ],
-    "project_default_path": "src"
-  }
+  "blockedCommands": [
+    "format",
+    "mount",
+    "umount",
+    "mkfs",
+    "fdisk",
+    "dd",
+    "sudo",
+    "su",
+    "passwd",
+    "adduser",
+    "useradd",
+    "usermod",
+    "groupadd"
+  ],
+  "project_default_path": "src",
+  "dir_whitelist": [
+    "src",
+    "work/src"
+  ]
+}

@@ -312,12 +312,21 @@ Would you like me to start exploring the project now?
             current_project = project_info
             os.chdir(project_path)
             
-            # Return project info message
+            # Return project info message with path prefix guidance
             return f"""Switched to project: {project_info['name']}
+Current working directory is now: {project_path}
+
+Working with the project files:
+- List files with: list_directory("{project_path}") or list_directory(".")
+- Use project-relative paths with "proj:" prefix: list_directory("proj:src")
+- Read files with: read_file("proj:README.md")
+- Write files with: write_file("proj:package.json", json_content) - auto-formats JSON files
+- Search with: search_files("proj:src", "*.py")
 
 Would you like me to:
 1. Explore the project and create an initial understanding?
-2. Continue with this project?
+2. List the project files with list_directory(".")?
+3. Continue without exploration?
 
 You can use explore_project() to analyze the project structure."""
         except Exception as e:
