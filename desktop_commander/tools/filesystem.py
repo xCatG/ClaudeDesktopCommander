@@ -10,19 +10,147 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
-from typing import List
+from typing import List, Optional, Union, Any
+
+# Import current_project from project module (at runtime to avoid circular imports)
+# This will be used for project-relative path handling
+current_project = None
+def _get_current_project():
+    """Get the current project information, handling circular imports."""
+    global current_project
+    if current_project is None:
+        try:
+            from desktop_commander.tools.project import current_project as proj
+            current_project = proj
+        except ImportError:
+            # Fallback if import fails
+            current_project = {"path": None, "name": None, "type": None}
+    return current_project
 
 # === Path Utilities ===
 
+def _resolve_project_path(path: str) -> str:
+    """
+    Resolve a path that might be relative to the current project.
+    
+    Handles several cases:
+    1. If path starts with "proj:" or "project:", it's treated as relative to current project
+    2. If path matches the current project name or basename, use the full project path
+    3. Otherwise, return the path unchanged
+    
+    Returns the resolved path or raises ValueError if no project is active when needed.
+    """
+    # Get the current project if needed
+    project = _get_current_project()
+    
+    # Handle proj: prefix for project-relative paths
+    if path.startswith("proj:"):
+        rel_path = path[5:].lstrip("/\\")
+        if not project["path"]:
+            raise ValueError("No active project. Use discover_projects and use_project first.")
+        return os.path.join(project["path"], rel_path)
+    elif path.startswith("project:"):
+        rel_path = path[8:].lstrip("/\\")
+        if not project["path"]:
+            raise ValueError("No active project. Use discover_projects and use_project first.")
+        return os.path.join(project["path"], rel_path)
+        
+    # Handle when just the project name is provided
+    if (project["path"] is not None and 
+        (path == project["name"] or 
+         path == os.path.basename(project["path"]))):
+        print(f"Note: Using full project path for '{path}'", file=sys.stderr)
+        return project["path"]
+        
+    # Default - just return the path unchanged
+    return path
+
+def _get_whitelisted_directories() -> List[str]:
+    """
+    Get the list of whitelisted directories from config or defaults.
+    Handles both relative (to home) and absolute paths for Linux and Windows.
+    """
+    home_dir = os.path.expanduser("~")
+    
+    # Start with default allowed directories
+    allowed = [
+        os.getcwd(),  # Current working directory is always allowed
+    ]
+    
+    # Try to load whitelist from config
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config = json.load(f)
+                
+            # Get dir_whitelist from config
+            whitelist = config.get("dir_whitelist", [])
+            
+            # If whitelist is empty, default to allowing the home directory
+            if not whitelist:
+                whitelist = [""]  # Empty string means home directory itself
+            
+            for path in whitelist:
+                # Skip empty entries (prevents errors)
+                if path is None:
+                    continue
+                    
+                if not path:
+                    # Empty string means the home directory itself
+                    allowed.append(home_dir)
+                    continue
+                
+                # Handle Windows paths with backslashes and drive letters
+                if os.name == 'nt':  # Windows
+                    # Check for Windows drive letter pattern (C:\, D:\, etc.)
+                    if re.match(r'^[a-zA-Z]:\\', path):
+                        # Use as-is (it's an absolute Windows path)
+                        allowed.append(os.path.normpath(path))
+                        continue
+                else:  # Unix-like systems
+                    # On Unix systems, convert Windows-style paths for compatibility
+                    if re.match(r'^[a-zA-Z]:\\', path) or re.match(r'^[a-zA-Z]:/', path):
+                        # This is a Windows path on a Unix system - normalize it
+                        normalized = path.replace('\\', '/')
+                        allowed.append(os.path.normpath(normalized))
+                        continue
+                
+                # Handle standard absolute paths
+                if path.startswith('/') or path.startswith('\\'):
+                    # Absolute paths are used as-is
+                    allowed.append(os.path.normpath(path))
+                else:
+                    # Relative paths are relative to home directory
+                    # Replace backslashes with the system's path separator 
+                    path = path.replace('\\', os.sep).replace('/', os.sep)
+                    allowed.append(os.path.normpath(os.path.join(home_dir, path)))
+        else:
+            # Default to allow home directory if no config
+            allowed.append(home_dir)
+    except Exception as e:
+        print(f"Error loading directory whitelist: {str(e)}", file=sys.stderr)
+        # Default to home directory if error
+        allowed.append(home_dir)
+    
+    # Print the allowed directories for debugging
+    print(f"Whitelisted directories: {allowed}", file=sys.stderr)
+        
+    return allowed
+
 def _validate_path(requested_path: str) -> str:
     """
-    Validate that a path is within allowed directories.
+    Validate that a path is within allowed directories based on the whitelist.
     Returns the absolute path if valid, raises Exception if not.
+    
+    Handles:
+    - Paths relative to current directory
+    - Paths relative to home directory (~)
+    - Absolute paths
+    - Windows and Linux path formats
     """
-    allowed_directories = [
-        os.getcwd(),         # Current working directory
-        os.path.expanduser("~")  # User's home directory
-    ]
+    # Get the whitelisted directories
+    allowed_directories = _get_whitelisted_directories()
     
     # Expand ~ to user's home directory
     if requested_path.startswith("~/") or requested_path == "~":
@@ -37,44 +165,98 @@ def _validate_path(requested_path: str) -> str:
         else os.path.abspath(os.path.join(os.getcwd(), expanded_path))
     )
     
-    # Normalize paths for comparison
+    # Normalize paths for comparison - handle Windows/Linux differences
     def normalize_path(p):
-        return os.path.normpath(p).lower()
+        """
+        Normalize path for consistent cross-platform comparison:
+        1. Use os.path.normpath to handle . and .. and redundant separators
+        2. Convert to lowercase for case-insensitive comparison
+        3. Replace separators with a consistent character
+        
+        This ensures paths like 'C:\\Users', 'C:/Users', and 'c:/users' all match.
+
+        """
+        if p is None:
+            return ""
+            
+        # Normalize path with OS-specific normalization
+        norm_path = os.path.normpath(p).lower()
+        
+        # Convert all separators to forward slashes for consistent comparison
+        # This works for both Windows and Unix
+        norm_path = norm_path.replace('\\', '/')
+        
+        # Ensure trailing slash consistency
+        if norm_path.endswith('/'):
+            norm_path = norm_path[:-1]
+            
+        return norm_path
     
     normalized_requested = normalize_path(absolute)
     
     # Check if path is within allowed directories
-    is_allowed = any(
-        normalized_requested.startswith(normalize_path(dir)) 
-        for dir in allowed_directories
-    )
+    is_allowed = False
+    for allowed_dir in allowed_directories:
+        normalized_allowed = normalize_path(allowed_dir)
+        
+        # A path is allowed if:
+        # 1. It's exactly the same as an allowed directory
+        # 2. It starts with the allowed directory followed by a path separator
+        if (normalized_requested == normalized_allowed or 
+            normalized_requested.startswith(normalized_allowed + '/')):
+            is_allowed = True
+            print(f"Path allowed: {requested_path} matches whitelist entry: {allowed_dir}", file=sys.stderr)
+            break
     
     if not is_allowed:
-        raise Exception(f"Access denied - path outside allowed directories: {absolute}")
+        # List the allowed directories in the error message to help with debugging
+        allowed_dirs_str = ", ".join(allowed_directories)
+        raise Exception(f"Access denied - path outside whitelisted directories: {absolute}\nAllowed directories: {allowed_dirs_str}")
     
-    # Check symlinks
+    # Check symlinks to prevent path traversal attacks
     if os.path.exists(absolute) and os.path.islink(absolute):
         real_path = os.path.realpath(absolute)
         normalized_real = normalize_path(real_path)
         
         is_real_allowed = any(
-            normalized_real.startswith(normalize_path(dir))
+            normalized_real == normalize_path(dir) or 
+            normalized_real.startswith(normalize_path(dir) + '/') 
             for dir in allowed_directories
         )
         
         if not is_real_allowed:
-            raise Exception("Access denied - symlink target outside allowed directories")
+            raise Exception(f"Access denied - symlink target outside whitelisted directories: {real_path}")
     
     return absolute
 
 def get_allowed_directories() -> List[str]:
-    """Get the list of allowed directories."""
-    return [
-        os.getcwd(),         # Current working directory
-        os.path.expanduser("~")  # User's home directory
-    ]
+    """Get the list of whitelisted directories."""
+    return _get_whitelisted_directories()
 
 # === Tool Registration ===
+
+def normalize_line_endings(text: str) -> str:
+    """Normalize line endings to avoid platform-specific issues."""
+    return text.replace('\r\n', '\n')
+
+def create_unified_diff(original_content: str, new_content: str, filepath: str = 'file') -> str:
+    """Create a unified diff between two text contents."""
+    import difflib
+    
+    # Normalize line endings for consistent diff
+    original_normalized = normalize_line_endings(original_content)
+    new_normalized = normalize_line_endings(new_content)
+    
+    # Generate the diff
+    diff = difflib.unified_diff(
+        original_normalized.splitlines(),
+        new_normalized.splitlines(),
+        fromfile=f"{filepath} (original)",
+        tofile=f"{filepath} (modified)",
+        lineterm=''
+    )
+    
+    return '\n'.join(diff)
 
 def register_tools(mcp):
     """Register filesystem tools with the MCP server."""
@@ -90,12 +272,25 @@ def register_tools(mcp):
     @mcp.tool()
     async def read_file(path: str) -> str:
         """
-        Read the complete contents of a file from the file system. 
+        Read the complete contents of a file from the file system.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/file.txt"
+        - Relative paths: "./file.txt" or "docs/readme.md"
+        - Project-relative paths: "proj:src/utils/helper.py" (relative to current project)
+        
         Only works within allowed directories.
+        
+        Args:
+            path: Path to the file, with optional "proj:" prefix for project-relative paths
+            
+        Returns:
+            File contents or error message
         """
         try:
-            # Validate path
-            valid_path = _validate_path(path)
+            # Resolve and validate path
+            resolved_path = _resolve_project_path(path)
+            valid_path = _validate_path(resolved_path)
             
             with open(valid_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -104,73 +299,335 @@ def register_tools(mcp):
         except Exception as e:
             return f"Error reading file: {str(e)}"
 
-    @mcp.tool()
-    async def write_file(path: str, content: str) -> str:
+    # Define a function outside the tool registration to handle both string and dict inputs
+    def _write_file_impl(path: str, content, auto_format_json: bool = True) -> str:
         """
-        Completely replace file contents. Best for large changes or when edit_block fails.
-        Only works within allowed directories.
+        Implementation of write_file that handles both string and dict/list content.
+        This approach ensures we can process the content before the MCP validation.
+        """
+        # Convert content to string if it's not a string
+        if not isinstance(content, str):
+            try:
+                # If it's a JSON-serializable object, convert it
+                content = json.dumps(content, indent=2, ensure_ascii=False)
+                print(f"Automatically converted non-string content to JSON string: {type(content)}", file=sys.stderr)
+            except Exception as e:
+                return f"Error: Content could not be converted to string: {str(e)}"
         
-        Args:
-            path: The path where to write the file
-            content: Content to write as a string. For JSON/dict data, serialize it before passing.
-        """
         try:
-            # Validate path
-            valid_path = _validate_path(path)
+            # Resolve and validate path
+            resolved_path = _resolve_project_path(path)
+            valid_path = _validate_path(resolved_path)
             
-            with open(valid_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            # Ensure parent directory exists
+            parent_dir = os.path.dirname(valid_path)
+            if parent_dir:  # Only try to create if there's a parent directory
+                os.makedirs(parent_dir, exist_ok=True)
+            
+            # Check if this is a JSON file or JSON content
+            is_json_file = valid_path.lower().endswith('.json') and auto_format_json
+            
+            # Also try to detect if content looks like JSON even if filename doesn't end with .json
+            looks_like_json = False
+            if auto_format_json and not is_json_file:
+                # Strip whitespace and check if content starts with { or [
+                stripped = content.strip()
+                if (stripped.startswith('{') and stripped.endswith('}')) or \
+                   (stripped.startswith('[') and stripped.endswith(']')):
+                    looks_like_json = True
+            
+            if is_json_file or looks_like_json:
+                try:
+                    # Try to parse the content as JSON
+                    parsed_json = json.loads(content)
+                    
+                    # Format with pretty indentation and ensure non-ASCII characters are preserved
+                    formatted_content = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+                    
+                    # Write the formatted JSON
+                    with open(valid_path, "w", encoding="utf-8") as f:
+                        f.write(formatted_content)
+                        
+                    return f"Successfully wrote and formatted JSON to {valid_path}"
+                except json.JSONDecodeError as json_error:
+                    # If JSON parsing fails, provide a helpful error message
+                    line_col = f"line {json_error.lineno}, column {json_error.colno}"
+                    error_detail = f"JSON validation error at {line_col}: {json_error.msg}"
+                    print(f"JSON error: {error_detail}", file=sys.stderr)
+                    
+                    # For JSON files, require valid JSON
+                    if is_json_file:
+                        return f"Error: Invalid JSON - {error_detail}. File not written. To write invalid JSON, set auto_format_json=False."
+                    
+                    # For content that just looks like JSON but isn't a .json file, 
+                    # write it unformatted as a fallback
+                    print(f"Writing unformatted content as fallback", file=sys.stderr)
+                    with open(valid_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    
+                    return f"Warning: Content appears to be invalid JSON but was written as-is to {valid_path}"
+            else:
+                # For non-JSON files, write content normally
+                with open(valid_path, "w", encoding="utf-8") as f:
+                    f.write(content)
                 
-            return f"Successfully wrote to {valid_path}"
+                return f"Successfully wrote to {valid_path}"
         except Exception as e:
             return f"Error writing file: {str(e)}"
-
+    
     @mcp.tool()
-    async def write_json_file(path: str, content_json: str) -> str:
+    async def write_file(path: str, content: Union[str, Any]) -> str:
         """
-        Write JSON data to a file. Accepts a JSON string and properly formats it.
+        Write content to a file with smart handling of different file types.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/file.txt"
+        - Relative paths: "./file.txt" or "docs/readme.md"
+        - Project-relative paths: "proj:src/utils/helper.py" (relative to current project)
+        
+        Features:
+        - Automatically creates parent directories if they don't exist
+        - For JSON files (ending in .json), automatically formats and validates the JSON
+        - For JavaScript/TypeScript files, preserves formatting
+        
         Only works within allowed directories.
         
         Args:
+            path: The path where to write the file, with optional "proj:" prefix for project-relative paths
+            content: Content to write as a string. DO NOT PASS IN json objects, serialize it to a string first.
+            auto_format_json: Whether to auto-format and validate JSON content (default: True)
+            
+        Returns:
+            Success message or error
+        """
+        # Call the implementation function
+        return _write_file_impl(path, content, True)
+
+    @mcp.tool()
+    async def write_json_file(path: str, content_json: Union[str, Any]) -> str:
+        """
+        [DEPRECATED] Write JSON data to a file. Please use write_file() instead.
+        
+        This function is kept for backward compatibility but will be removed in the future.
+        The write_file() function now automatically detects and formats JSON files.
+        
+        Example usage:
+          Instead of: write_json_file("config.json", json_content)
+          Use: write_file("config.json", json_content)
+        
+        Args:
             path: The path where to write the file
-            content_json: JSON string to write (must be valid JSON)
+            content_json: JSON string to write
             
         Returns:
             Success message or error
         """
         try:
-            # Parse and re-serialize the JSON to ensure it's valid and properly formatted
-            try:
-                # Parse the JSON string
-                parsed_json = json.loads(content_json)
-                
-                # Re-serialize with indentation
-                formatted_json = json.dumps(parsed_json, indent=2)
-            except json.JSONDecodeError as json_error:
-                print(f"Invalid JSON: {str(json_error)}", file=sys.stderr)
-                return f"Error: Invalid JSON input - {str(json_error)}"
-                
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            
-            # Write the formatted JSON to file
-            with open(path, "w") as f:
-                f.write(formatted_json)
-                
-            return f"Successfully wrote JSON to {path}"
+            # Call the implementation function directly to bypass type validation
+            return _write_file_impl(path, content_json, auto_format_json=True)
         except Exception as e:
-            print(f"Error writing JSON file: {str(e)}", file=sys.stderr)
+            print(f"Error in write_json_file: {str(e)}", file=sys.stderr)
+            return f"Error writing JSON file: {str(e)}"
+            
+    @mcp.tool()
+    async def edit_json(path: str, updates: str) -> str:
+        """
+        Update a JSON file with specific key-value changes.
+        
+        This specialized tool makes it easy to modify JSON files by providing
+        a dictionary of changes to apply to the existing JSON.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/config.json"
+        - Relative paths: "./config.json" or "configs/settings.json"
+        - Project-relative paths: "proj:src/data/config.json" (relative to current project)
+        
+        Features:
+        - Only modifies specified keys without changing the rest of the file
+        - Creates the file if it doesn't exist
+        - Updates nested properties using dot notation
+        - Preserves existing formatting and comments
+        
+        Args:
+            path: Path to the JSON file, with optional "proj:" prefix
+            updates: JSON string containing the changes to apply, example: '{"version": "1.1.0", "settings.debug": true}'
+            
+        Example:
+            edit_json("config.json", '{"version": "1.1.0", "settings.debug": true}')
+            
+        Returns:
+            Success message with details of applied changes
+        """
+        try:
+            # Add .json extension if not present
+            if not path.lower().endswith('.json'):
+                path = path + '.json'
+                
+            # Resolve and validate path
+            resolved_path = _resolve_project_path(path)
+            valid_path = _validate_path(resolved_path)
+            
+            # Parse the updates
+            try:
+                updates_dict = json.loads(updates) if isinstance(updates, str) else updates
+            except json.JSONDecodeError as json_error:
+                line_col = f"line {json_error.lineno}, column {json_error.colno}"
+                error_detail = f"JSON validation error in updates at {line_col}: {json_error.msg}"
+                return f"Error: Invalid JSON updates - {error_detail}. No changes applied."
+            
+            # Read existing JSON or create new if file doesn't exist
+            try:
+                if os.path.exists(valid_path):
+                    with open(valid_path, "r", encoding="utf-8") as f:
+                        try:
+                            data = json.load(f)
+                        except json.JSONDecodeError as e:
+                            return f"Error: The existing file contains invalid JSON: {str(e)}"
+                else:
+                    # File doesn't exist, create a new empty JSON object
+                    data = {}
+                    # Ensure parent directory exists
+                    parent_dir = os.path.dirname(valid_path)
+                    if parent_dir:
+                        os.makedirs(parent_dir, exist_ok=True)
+            except Exception as e:
+                return f"Error reading JSON file: {str(e)}"
+            
+            # Apply the updates
+            changes = []
+            
+            for key, value in updates_dict.items():
+                # Check for nested keys using dot notation
+                if "." in key:
+                    parts = key.split(".")
+                    current = data
+                    # Navigate to the nested object, creating intermediate objects if needed
+                    for i, part in enumerate(parts[:-1]):
+                        if part not in current:
+                            current[part] = {}
+                        elif not isinstance(current[part], dict):
+                            # Convert to dict if it wasn't one
+                            old_value = current[part]
+                            current[part] = {"_value": old_value}
+                        current = current[part]
+                    
+                    # Update the final value
+                    final_key = parts[-1]
+                    old_value = current.get(final_key, None)
+                    current[final_key] = value
+                    changes.append(f"{key}: {old_value} -> {value}")
+                else:
+                    # Direct key update
+                    old_value = data.get(key, None)
+                    data[key] = value
+                    changes.append(f"{key}: {old_value} -> {value}")
+            
+            # Write the updated JSON back to the file
+            with open(valid_path, "w", encoding="utf-8") as f:
+                json.dump(data, indent=2, fp=f, ensure_ascii=False)
+            
+            # Return success message with changes
+            changes_text = "\n".join(changes)
+            return f"Successfully updated JSON file {valid_path} with the following changes:\n{changes_text}"
+            
+        except Exception as e:
+            return f"Error editing JSON file: {str(e)}"
+    
+    @mcp.tool()
+    async def save_json(path: str, json_data: Union[str, Any], indent: int = 2) -> str:
+        """
+        Write JSON data to a file with proper formatting.
+        
+        This specialized tool handles both JSON strings and objects safely.
+        It's the best way to save JSON configuration files.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/config.json"
+        - Relative paths: "./config.json" or "configs/settings.json"
+        - Project-relative paths: "proj:src/data/config.json" (relative to current project)
+        
+        Features:
+        - Automatically creates parent directories if they don't exist
+        - Validates and formats JSON with proper indentation
+        - Preserves non-ASCII characters in JSON files
+        - Provides helpful error messages for JSON syntax issues
+        
+        Args:
+            path: The path where to write the file, with optional "proj:" prefix
+            json_data: JSON data as a string, example: '{"name": "value"}'
+            indent: Number of spaces for indentation (default: 2)
+            
+        Example:
+            save_json("config.json", '{"version": "1.0", "debug": false}')
+            
+        Returns:
+            Success message or error
+        """
+        try:
+            # Add .json extension if not present
+            if not path.lower().endswith('.json'):
+                path = path + '.json'
+                
+            # Resolve and validate path
+            resolved_path = _resolve_project_path(path)
+            valid_path = _validate_path(resolved_path)
+            
+            # Ensure parent directory exists
+            parent_dir = os.path.dirname(valid_path)
+            if parent_dir:  # Only try to create if there's a parent directory
+                os.makedirs(parent_dir, exist_ok=True)
+            
+            # Parse and validate the JSON data
+            try:
+                # If it's already a string, try to parse it to validate
+                if isinstance(json_data, str):
+                    parsed_json = json.loads(json_data)
+                else:
+                    # If it's not a string, assume it's already a Python object
+                    parsed_json = json_data
+                    
+                # Format with proper indentation and ensure non-ASCII characters are preserved
+                formatted_json = json.dumps(parsed_json, indent=indent, ensure_ascii=False)
+                
+                # Write the formatted JSON
+                with open(valid_path, "w", encoding="utf-8") as f:
+                    f.write(formatted_json)
+                    
+                return f"Successfully wrote and formatted JSON to {valid_path}"
+                
+            except json.JSONDecodeError as json_error:
+                # If JSON parsing fails, provide a helpful error message
+                line_col = f"line {json_error.lineno}, column {json_error.colno}"
+                error_detail = f"JSON validation error at {line_col}: {json_error.msg}"
+                return f"Error: Invalid JSON - {error_detail}. File not written."
+                
+        except Exception as e:
             return f"Error writing JSON file: {str(e)}"
 
     @mcp.tool()
-    async def list_directory(path: str) -> str:
+    async def list_directory(path: str = ".") -> str:
         """
         Get a detailed listing of all files and directories in a specified path.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject"
+        - Relative paths: "." or "src/utils"
+        - Project-relative paths: "proj:src/utils" (relative to current project)
+        - Project name: If you provide just the project name, it will list the project root
+        
+        If no path is provided, defaults to current directory (".").
         Only works within allowed directories.
+        
+        Args:
+            path: Path to list, with optional "proj:" prefix for project-relative paths
+            
+        Returns:
+            Formatted directory listing or error message
         """
         try:
-            # Validate path
-            valid_path = _validate_path(path)
+            # Resolve and validate path
+            resolved_path = _resolve_project_path(path)
+            valid_path = _validate_path(resolved_path)
             
             entries = []
             for entry in os.listdir(valid_path):
@@ -181,7 +638,8 @@ def register_tools(mcp):
             if not entries:
                 return f"Directory {valid_path} is empty"
             
-            return "\n".join(entries)
+            # Show the resolved path in the output to help the agent understand
+            return f"Listing directory: {valid_path}\n\n" + "\n".join(entries)
         except Exception as e:
             return f"Error listing directory: {str(e)}"
 
@@ -193,8 +651,9 @@ def register_tools(mcp):
         Only works within allowed directories.
         """
         try:
-            # Validate path
-            valid_path = _validate_path(path)
+            # Resolve and validate path
+            resolved_path = _resolve_project_path(path)
+            valid_path = _validate_path(resolved_path)
             
             os.makedirs(valid_path, exist_ok=True)
             return f"Successfully created directory {valid_path}"
@@ -279,11 +738,26 @@ def register_tools(mcp):
     async def search_files(path: str, pattern: str) -> str:
         """
         Search for files matching a pattern within a directory.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject"
+        - Relative paths: "." or "src/utils"
+        - Project-relative paths: "proj:src" (relative to current project)
+        - Project name: If you provide just the project name, it will search the project root
+        
         Only searches within allowed directories.
+        
+        Args:
+            path: Directory to search in, with optional "proj:" prefix for project-relative paths
+            pattern: Filename pattern to match (case-insensitive)
+            
+        Returns:
+            List of matching files or error message
         """
         try:
-            # Validate path
-            valid_path = _validate_path(path)
+            # Resolve and validate path
+            resolved_path = _resolve_project_path(path)
+            valid_path = _validate_path(resolved_path)
             
             results = []
             pattern_lower = pattern.lower()
@@ -300,7 +774,7 @@ def register_tools(mcp):
             if not results:
                 return f"No files matching '{pattern}' found in {valid_path}"
             
-            return "\n".join(results)
+            return f"Search results for '{pattern}' in {valid_path}:\n\n" + "\n".join(results)
         except Exception as e:
             return f"Error searching files: {str(e)}"
 
@@ -309,7 +783,24 @@ def register_tools(mcp):
                           ignore_case: bool = True, max_results: int = 1000) -> str:
         """
         Search for text patterns within file contents using ripgrep or fallback method.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject"
+        - Relative paths: "." or "src/utils"
+        - Project-relative paths: "proj:src" (relative to current project)
+        - Project name: If you provide just the project name, it will search the project root
+        
         Only searches within allowed directories.
+        
+        Args:
+            path: Directory to search in, with optional "proj:" prefix for project-relative paths
+            pattern: Text pattern to search for in file contents
+            file_pattern: Optional pattern to filter filenames (e.g., "*.py" for Python files)
+            ignore_case: Whether to perform case-insensitive search (default: True)
+            max_results: Maximum number of results to return (default: 1000)
+            
+        Returns:
+            Search results or error message
         """
         try:
             # Validate path
@@ -406,40 +897,51 @@ def register_tools(mcp):
             return f"Error searching code: {str(e)}"
 
     @mcp.tool()
-    async def edit_block(file: str, search: str, replace: str) -> str:
+    async def edit_file(file: str, edits: list, dry_run: bool = False) -> str:
         """
-        Apply a surgical text replacement to a SINGLE FILE.
+        Apply multiple text edits to a single file.
         
-        IMPORTANT: This tool edits ONE FILE at a time only. It cannot edit directories.
+        IMPORTANT: This tool edits ONE FILE at a time with multiple changes.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/file.txt" 
+        - Relative paths: "./file.txt" or "docs/readme.md"
+        - Project-relative paths: "proj:src/utils/helper.py" (relative to current project)
         
         Args:
-            file: Path to the file to edit
-            search: The EXACT text block to find in the file (including whitespace/indentation)
-            replace: The new text that will replace the search text
-        
-        The tool finds the exact text specified in "search" and replaces it with the text in "replace".
-        Only the first occurrence of the search text will be replaced.
-        
+            file: Path to the file to edit, with optional "proj:" prefix for project-relative paths
+            edits: List of edit operations, each with "oldText" and "newText" keys
+            dry_run: If True, show changes without applying them (default: False)
+            
         Example:
-            file: "/home/user/myproject/src/file.js"
-            search: "function hello() {\n  console.log('hello');\n}"
-            replace: "function hello() {\n  console.log('hello world');\n}"
-        
+            file: "proj:src/config.json"
+            edits: [
+                {"oldText": "\"version\": \"1.0.0\"", "newText": "\"version\": \"1.1.0\""},
+                {"oldText": "\"debug\": false", "newText": "\"debug\": true"}
+            ]
+            
         Returns:
-            Success message or detailed error information
+            Success message with git-style diff showing the changes
         """
         try:
-            # Extract edit parameters
-            file_path = file
-            search_text = search
-            replace_text = replace
-            
             # Validate parameters
-            if not all([file_path, search_text is not None, replace_text is not None]):
-                return "Error: Missing required parameters. Must include 'file', 'search', and 'replace'."
+            if not file:
+                return "Error: Missing required 'file' parameter."
+                
+            if not edits or not isinstance(edits, list):
+                return "Error: 'edits' must be a non-empty list of edit operations."
             
-            # Validate file path
-            valid_path = _validate_path(file_path)
+            # Validate edit operations
+            for i, edit in enumerate(edits):
+                if not isinstance(edit, dict):
+                    return f"Error: Edit operation #{i+1} must be a dictionary."
+                    
+                if 'oldText' not in edit or 'newText' not in edit:
+                    return f"Error: Edit operation #{i+1} must have 'oldText' and 'newText' keys."
+            
+            # Resolve and validate file path
+            resolved_path = _resolve_project_path(file)
+            valid_path = _validate_path(resolved_path)
             
             # Check if path is a directory
             if os.path.isdir(valid_path):
@@ -453,23 +955,173 @@ def register_tools(mcp):
             with open(valid_path, "r", encoding="utf-8", errors='replace') as f:
                 content = f.read()
             
+            # Normalize content line endings
+            content = normalize_line_endings(content)
+            
+            # Apply edits sequentially
+            modified_content = content
+            for i, edit in enumerate(edits):
+                old_text = normalize_line_endings(str(edit['oldText']))
+                new_text = normalize_line_endings(str(edit['newText']))
+                
+                # Find occurrence
+                index = modified_content.find(old_text)
+                if index == -1:
+                    return f"Error in edit #{i+1}: Text not found in file:\n```\n{old_text}\n```"
+                
+                # Replace content
+                modified_content = (
+                    modified_content[:index] + 
+                    new_text + 
+                    modified_content[index + len(old_text):]
+                )
+            
+            # Create unified diff
+            diff_text = create_unified_diff(content, modified_content, file)
+            
+            # In dry run mode, just return the diff
+            if dry_run:
+                return f"Showing changes that would be applied to {file}:\n\n```diff\n{diff_text}\n```"
+            
+            # Write the file if not in dry run mode
+            with open(valid_path, "w", encoding="utf-8") as f:
+                f.write(modified_content)
+            
+            # Return success message with diff
+            return f"Successfully applied {len(edits)} edit(s) to {file}:\n\n```diff\n{diff_text}\n```"
+            
+        except Exception as e:
+            return f"Error applying edits: {str(e)}"
+            
+    @mcp.tool()
+    async def edit_block(file: str, search: str, replace: str, dry_run: bool = False) -> str:
+        """
+        Apply a surgical text replacement to a SINGLE FILE.
+        
+        IMPORTANT: This tool edits ONE FILE at a time only. It cannot edit directories.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/file.txt"
+        - Relative paths: "./file.txt" or "src/utils/helper.py"
+        - Project-relative paths: "proj:src/main.py" (relative to current project)
+        
+        Args:
+            file: Path to the file to edit, with optional "proj:" prefix for project-relative paths
+            search: The EXACT text block to find in the file (including whitespace/indentation)
+            replace: The new text that will replace the search text
+            dry_run: If True, show changes without applying them
+        
+        The tool finds the exact text specified in "search" and replaces it with the text in "replace".
+        Only the first occurrence of the search text will be replaced.
+        
+        Example:
+            file: "proj:src/file.js"
+            search: "function hello() {\n  console.log('hello');\n}"
+            replace: "function hello() {\n  console.log('hello world');\n}"
+        
+        Returns:
+            Success message or detailed error information, with git-style diff when changes are made
+        """
+        try:
+            # Extract edit parameters
+            file_path = file
+            search_text = search
+            replace_text = replace
+            
+            # Validate parameters
+            if not all([file_path, search_text is not None, replace_text is not None]):
+                return "Error: Missing required parameters. Must include 'file', 'search', and 'replace'."
+            
+            # Defensive coding - ensure search and replace are strings
+            if not isinstance(search_text, str):
+                try:
+                    search_text = json.dumps(search_text, indent=2, ensure_ascii=False)
+                    print(f"Converted non-string search to JSON string", file=sys.stderr)
+                except Exception as e:
+                    return f"Error: Search must be a string, got {type(search_text)}: {str(e)}"
+                    
+            if not isinstance(replace_text, str):
+                try:
+                    replace_text = json.dumps(replace_text, indent=2, ensure_ascii=False)
+                    print(f"Converted non-string replace to JSON string", file=sys.stderr)
+                except Exception as e:
+                    return f"Error: Replace must be a string, got {type(replace_text)}: {str(e)}"
+            
+            # Resolve and validate file path
+            resolved_path = _resolve_project_path(file_path)
+            valid_path = _validate_path(resolved_path)
+            
+            # Check if path is a directory
+            if os.path.isdir(valid_path):
+                return f"Error: {valid_path} is a directory, not a file. This tool can only edit individual files."
+            
+            # Check if file exists
+            if not os.path.isfile(valid_path):
+                return f"Error: File {valid_path} does not exist"
+            
+            # Read the file
+            with open(valid_path, "r", encoding="utf-8", errors='replace') as f:
+                content = f.read()
+            
+            # Normalize line endings to avoid issues
+            content = content.replace('\r\n', '\n')
+            search_text = search_text.replace('\r\n', '\n')
+            replace_text = replace_text.replace('\r\n', '\n')
+            
             # Find occurrence
             search_index = content.find(search_text)
             if search_index == -1:
-                return f"Error: Search content not found in {file_path}"
+                # Try with more flexible matching for whitespace-only differences
+                content_lines = content.split('\n')
+                search_lines = search_text.split('\n')
+                
+                found = False
+                for i in range(len(content_lines) - len(search_lines) + 1):
+                    potential_match = True
+                    for j in range(len(search_lines)):
+                        if content_lines[i+j].strip() != search_lines[j].strip():
+                            potential_match = False
+                            break
+                    
+                    if potential_match:
+                        # Found a match with whitespace differences
+                        found = True
+                        found_block = '\n'.join(content_lines[i:i+len(search_lines)])
+                        
+                        return (f"Warning: Exact text not found, but found a similar block with "
+                                f"whitespace differences. Please use the exact text:\n\n```\n{found_block}\n```")
+                
+                if not found:
+                    return f"Error: Search content not found in {file_path}"
             
-            # Replace content
+            # Create new content
             new_content = (
                 content[:search_index] + 
                 replace_text + 
                 content[search_index + len(search_text):]
             )
             
-            # Write the file
+            # Create a unified diff
+            import difflib
+            diff = difflib.unified_diff(
+                content.splitlines(),
+                new_content.splitlines(),
+                fromfile=f"{file_path} (original)",
+                tofile=f"{file_path} (modified)",
+                lineterm=''
+            )
+            diff_text = '\n'.join(diff)
+            
+            # In dry run mode, just return the diff
+            if dry_run:
+                return f"Showing changes that would be applied to {file_path}:\n\n```diff\n{diff_text}\n```"
+            
+            # Write the file if not in dry run mode
             with open(valid_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             
-            return f"Successfully applied edit to {file_path}"
+            # Return success message with diff
+            return f"Successfully applied edit to {file_path}:\n\n```diff\n{diff_text}\n```"
             
         except Exception as e:
             return f"Error applying edit: {str(e)}"

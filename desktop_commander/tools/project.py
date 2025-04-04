@@ -14,12 +14,7 @@ from typing import List, Dict, Optional
 from pathlib import Path
 from datetime import datetime
 
-# Import the structured memo creator
-try:
-    from scripts.create_structured_memo import create_structured_memo as create_structured_json_memo
-except ImportError:
-    # Fallback for when the script is imported from different contexts
-    create_structured_json_memo = None
+# No longer importing the structured memo creator
 
 # Load configuration
 def load_config():
@@ -54,23 +49,25 @@ def get_project_base_dir():
 current_project = {
     "path": None,
     "name": None,
-    "memo_path": None,
-    "has_memo": False
+    "type": None
 }
 
 def register_tools(mcp):
     """Register project navigation tools with the MCP server."""
     
+    # Import the knowledge graph manager here to avoid circular imports
+    from desktop_commander.tools.knowledge_graph import graph_manager
+    
     @mcp.tool()
     def explore_project(project_path: str = None) -> str:
         """
-        Explore a project and generate a high-level understanding.
+        Provides instructions for an agent to explore a project and store knowledge.
         
         Args:
             project_path: Optional path to the project (uses current project if not specified)
             
         Returns:
-            Summary of project exploration and analysis
+            Instructions for project exploration
         """
         try:
             # Use current project if no path specified
@@ -86,131 +83,133 @@ def register_tools(mcp):
             # Get project info
             project_info = _check_if_project(project_path) or {}
             project_name = project_info.get("name") or os.path.basename(project_path)
+            project_type = project_info.get("type")
             
-            # Create project analysis
-            analysis = {}
+            # Get type-specific file suggestions
+            type_specific_files = _get_type_specific_files(project_type, project_path)
             
-            # Check for repository information
-            git_path = os.path.join(project_path, ".git")
-            has_git = os.path.exists(git_path)
-            analysis["has_git"] = has_git
-            
-            # Check for common project files
-            common_files = {
-                "package.json": "Node.js/JavaScript",
-                "setup.py": "Python",
-                "requirements.txt": "Python",
-                "Cargo.toml": "Rust",
-                "pom.xml": "Java/Maven",
-                "build.gradle": "Java/Gradle",
-                "CMakeLists.txt": "C++/CMake",
-                "Makefile": "C/C++",
-                "Dockerfile": "Docker",
-                "docker-compose.yml": "Docker Compose",
-                "go.mod": "Go",
-                "mix.exs": "Elixir",
-                "Gemfile": "Ruby"
-            }
-            
-            detected_types = []
-            for file, tech_type in common_files.items():
-                if os.path.exists(os.path.join(project_path, file)):
-                    detected_types.append(tech_type)
-            
-            analysis["detected_types"] = detected_types
-            
-            # Collect directory structure information
-            dirs = []
-            files_by_ext = {}
-            
-            for root, directories, files in os.walk(project_path, topdown=True):
-                # Skip git and virtual environment directories
-                directories[:] = [d for d in directories if d not in [".git", "node_modules", "__pycache__", "venv", ".venv", "env", ".env"]]
-                
-                rel_path = os.path.relpath(root, project_path)
-                if rel_path != ".":
-                    dirs.append(rel_path)
-                
-                # Count file extensions
-                for file in files:
-                    _, ext = os.path.splitext(file)
-                    if ext:
-                        ext = ext.lower()
-                        files_by_ext[ext] = files_by_ext.get(ext, 0) + 1
-            
-            analysis["directories"] = dirs[:10]  # Limit to top 10 directories
-            analysis["file_types"] = {k: v for k, v in sorted(files_by_ext.items(), key=lambda item: item[1], reverse=True)[:10]}
-            
-            # Generate summary text
-            summary = [f"# Project Analysis: {project_name}"]
-            
-            # Project type
-            if detected_types:
-                summary.append("\n## Project Type")
-                summary.append(f"This appears to be a {', '.join(detected_types)} project.")
-            
-            # Repository info
-            summary.append("\n## Repository")
-            if has_git:
-                summary.append("This project is a Git repository.")
-            else:
-                summary.append("This project is not a Git repository.")
-            
-            # Structure summary
-            summary.append("\n## Structure Overview")
-            if dirs:
-                summary.append("Key directories:")
-                for d in analysis["directories"][:5]:
-                    summary.append(f"- {d}")
-            
-            # File types
-            if files_by_ext:
-                summary.append("\nFile types:")
-                for ext, count in analysis["file_types"].items():
-                    summary.append(f"- {ext}: {count} files")
-            
-            # Create memo suggestion
-            memo_suggestion = "\n## Suggested Memo Content\n"
-            memo_suggestion += f"""
-# Project: {project_name}
+            # Instructions for the agent
+            instructions = f"""# Project Exploration Instructions: {project_name}
 
-## Overview
-- {project_name} is a {'/'.join(detected_types[:2]) if detected_types else 'software'} project
-- {len(analysis.get('directories', []))} directories and multiple file types found
-- Main technologies: {', '.join(detected_types) if detected_types else 'Unknown'}
+I'll assist you in exploring this project. Here's what you should do:
 
-## Current Status
-- Initial project exploration completed on {datetime.now().strftime('%Y-%m-%d')}
-- Further analysis needed for specific functionality
+1. **Basic Project Analysis**:
+   - Examine key files like `README.md`, `package.json`, `setup.py`, etc.
+   - Look for documentation in `/docs` or similar directories
+   - Identify main technologies and frameworks used
 
-## Action Items
-### TODO
-- [ ] High: Review project documentation
-- [ ] Medium: Identify key components
-- [ ] Medium: Document project architecture
+{type_specific_files}
 
-## Knowledge Base
-### Implementation
-- {', '.join(detected_types) if detected_types else 'Unknown'} project structure
-- Key directories: {', '.join(analysis.get('directories', [])[:3]) if analysis.get('directories') else 'None identified'}
+2. **Code Structure Analysis**:
+   - Identify core directories (src, lib, app, etc.)
+   - Map key components and their relationships
+   - Determine entry points and main modules
+
+3. **Store Project Knowledge**:
+   After exploration, capture your knowledge by creating a structured knowledge graph:
+   ```json
+   {{
+     "project_name": "{project_name}",
+     "entities": [
+       {{"id": "1", "name": "Component1", "entityType": "component", "description": "..."}},
+       {{"id": "2", "name": "Component2", "entityType": "module", "description": "..."}}
+     ],
+     "relations": [
+       {{"source": "1", "target": "2", "relationship": "depends_on", "description": "..."}}
+     ],
+     "file_exploration_tips": [
+       {{"project_type": "{project_type}", "key_files": ["file1.py", "file2.py"], "description": "These files are important entry points"}}
+     ]
+   }}
+   ```
+
+4. **Save Knowledge**:
+   Use `export_project_to_knowledge_graph()` with your JSON structure to save this knowledge
+
+5. **Contribute Exploration Tips**:
+   Include any file exploration tips you discover in the knowledge graph's `file_exploration_tips` section. These tips will help future explorations of similar projects.
+
+Once saved, the knowledge will be accessible via:
+- `knowledge://{project_name}/graph`
+- `knowledge://{project_name}/entities`
+- Other knowledge resources
+
+You can also use `sync_memory_to_project_knowledge("{project_name}")` if you've already stored this information in memory.
+
+Would you like me to start exploring the project now?
 """
-            
-            # Combine everything
-            result = "\n".join(summary) + "\n\n" + memo_suggestion
-            
-            # Create a basic memo structure if there's no memo
-            if not project_info.get("has_memo"):
-                memo_path = os.path.join(project_path, "claude_memo.md")
-                try:
-                    with open(memo_path, "w") as f:
-                        f.write(memo_suggestion.strip())
-                    result += f"\n\nCreated initial memo file at: {memo_path}"
-                except Exception as e:
-                    result += f"\n\nFailed to create memo file: {str(e)}"
-            
-            return result
+            return instructions
         except Exception as e:
-            return f"Error exploring project: {str(e)}"
+            return f"Error preparing project exploration: {str(e)}"
+            
+    def _get_type_specific_files(project_type, project_path):
+        """
+        Get type-specific file suggestions based on project type.
+        
+        Args:
+            project_type: Type of project (python, node, rust, etc.)
+            project_path: Path to the project
+            
+        Returns:
+            Type-specific file suggestions
+        """
+        # Initialize suggestions
+        suggestions = "\n   **Key Files to Examine First**:"
+        
+        # Get file suggestions based on project type
+        if project_type == "python":
+            suggestions += """
+   - Look for `setup.py` or `pyproject.toml` for project configuration
+   - Check for `requirements.txt` or `Pipfile` for dependencies
+   - Look for `__main__.py` files as entry points
+   - Examine any files named like `app.py`, `main.py`, or `run.py`
+   - If a Django project, check for `settings.py`, `urls.py`, and `models.py`
+   - If a Flask project, look for an `app` variable or `create_app()` function"""
+        elif project_type == "node":
+            suggestions += """
+   - Examine `package.json` for dependencies and scripts
+   - Check for configuration files like `.babelrc`, `tsconfig.json`, `.eslintrc`
+   - Look for entry points in `index.js`, `app.js`, or files referenced in package.json "main" field
+   - Review `webpack.config.js` or similar build configs
+   - If a React project, look for components in `src/components` or similar directories"""
+        elif project_type == "rust":
+            suggestions += """
+   - Check `Cargo.toml` for dependencies and project metadata
+   - Look at `src/main.rs` or `src/lib.rs` for entry points
+   - Review `build.rs` if it exists for build configurations
+   - Examine `.cargo/config.toml` for toolchain configuration"""
+        elif project_type == "java":
+            suggestions += """
+   - Examine `pom.xml` (Maven) or `build.gradle` (Gradle) for dependencies
+   - Look for main application classes that have a `main()` method
+   - Review `application.properties` or `application.yml` for Spring Boot projects
+   - Check for `src/main/java` and `src/test/java` directories"""
+        elif project_type == "git":
+            # Generic suggestions for git repos without specific project type indicators
+            suggestions += """
+   - Look for README.md or similar documentation
+   - Check for license files
+   - Examine any Dockerfile or docker-compose.yml
+   - Look for CI/CD configuration files (.github/workflows, .gitlab-ci.yml, etc.)
+   - Find entry point files like index.js, main.py, etc. in root or src directories"""
+        else:
+            # Generic suggestions
+            suggestions += """
+   - Look for README.md or similar documentation files
+   - Check for configuration files in the project root
+   - Examine any build or package files
+   - Look for source code directories (src, lib, app, etc.)
+   - Try to identify main entry point files"""
+           
+        # Check for file existence and add actual files found
+        actual_files = []
+        if os.path.exists(os.path.join(project_path, "README.md")):
+            actual_files.append("README.md")
+        
+        if actual_files:
+            suggestions += f"\n   - Found key files: {', '.join(actual_files)}"
+            
+        return suggestions
     
     @mcp.tool()
     def discover_projects(base_dir: Optional[str] = None) -> str:
@@ -269,9 +268,8 @@ def register_tools(mcp):
             # Format results
             result = [f"Found {len(projects)} projects in {base_dir}:"]
             for project in projects:
-                memo_status = "Has memo" if project["has_memo"] else "No memo"
                 project_type = f"Type: {project['type']}" if project.get("type") else ""
-                result.append(f"- {project['name']} ({memo_status}) {project_type} - {project['path']}")
+                result.append(f"- {project['name']} {project_type} - {project['path']}")
                 
             return "\n".join(result)
         except Exception as e:
@@ -289,7 +287,15 @@ def register_tools(mcp):
             Project context summary if available, otherwise basic project info
         """
         try:
-            project_path = os.path.abspath(project_path)
+            base_dir = get_project_base_dir()
+            base_dir = os.path.abspath(base_dir)
+            if not os.path.exists(base_dir):
+                return f"Base directory not found: {base_dir}"
+            # If project_path contains multiple parts, use the last part
+            project_name = os.path.basename(os.path.normpath(project_path))
+
+            # Form the absolute path by appending the project name to base_dir
+            project_path = os.path.join(base_dir, project_name)
             if not os.path.exists(project_path):
                 return f"Project not found: {project_path}"
                 
@@ -306,20 +312,23 @@ def register_tools(mcp):
             current_project = project_info
             os.chdir(project_path)
             
-            # If there's a memo, load and return it
-            if project_info["has_memo"]:
-                memo_content = _load_memo(project_info["memo_path"])
-                return f"Switched to project: {project_info['name']}\n\nProject memo found! Reading context...\n\nProject context from memo:\n\n{memo_content}"
-            else:
-                # No memo, suggest exploration and creation
-                return f"""Switched to project: {project_info['name']}
+            # Return project info message with path prefix guidance
+            return f"""Switched to project: {project_info['name']}
+Current working directory is now: {project_path}
 
-No project memo found. Would you like me to:
+Working with the project files:
+- List files with: list_directory("{project_path}") or list_directory(".")
+- Use project-relative paths with "proj:" prefix: list_directory("proj:src")
+- Read files with: read_file("proj:README.md")
+- Write files with: write_file("proj:package.json", json_content) - auto-formats JSON files
+- Search with: search_files("proj:src", "*.py")
+
+Would you like me to:
 1. Explore the project and create an initial understanding?
-2. Create a basic memo structure for this project?
-3. Continue without a project memo?
+2. List the project files with list_directory(".")?
+3. Continue without exploration?
 
-Creating a project memo would help maintain knowledge about this project across conversations."""
+You can use explore_project() to analyze the project structure."""
         except Exception as e:
             return f"Error using project: {str(e)}"
     
@@ -337,200 +346,11 @@ Creating a project memo would help maintain knowledge about this project across 
             
         result = [f"Current project: {current_project['name']}"]
         result.append(f"Path: {current_project['path']}")
-        result.append(f"Has memo: {current_project['has_memo']}")
         
         if current_project.get("type"):
             result.append(f"Type: {current_project['type']}")
             
-        if current_project["has_memo"]:
-            result.append("\nUse read_memo() to view the full project context.")
-            
         return "\n".join(result)
-    
-    @mcp.tool()
-    def create_project_memo(content: str) -> str:
-        """
-        Create a memo file for the current project with the specified content.
-        
-        Args:
-            content: Content to write to the memo file
-            
-        Returns:
-            Success message or error
-        """
-        global current_project
-        if not current_project["path"]:
-            return "No active project. Use discover_projects and use_project to select a project."
-            
-        try:
-            memo_path = os.path.join(current_project["path"], "claude_memo.md")
-            with open(memo_path, "w") as f:
-                f.write(content)
-                
-            # Update current project info
-            current_project["has_memo"] = True
-            current_project["memo_path"] = memo_path
-            
-            return f"Created project memo for {current_project['name']}"
-        except Exception as e:
-            return f"Error creating project memo: {str(e)}"
-            
-    @mcp.tool()
-    def create_structured_project_memo(output_format: str = "json") -> str:
-        """
-        Create a structured project memo in JSON format according to the enhanced schema.
-        
-        Args:
-            output_format: Format of the output file ("json" or "markdown")
-            
-        Returns:
-            Success message or error
-        """
-        global current_project
-        if not current_project["path"]:
-            return "No active project. Use discover_projects and use_project to select a project."
-            
-        try:
-            project_path = current_project["path"]
-            
-            if output_format.lower() == "json":
-                # Use the structured JSON memo creator
-                if not create_structured_json_memo:
-                    return "Error: Structured memo creator module not available"
-                    
-                json_memo_path = os.path.join(project_path, "claude_memo.json")
-                result_path = create_structured_json_memo(project_path, json_memo_path)
-                
-                # Also update the current project info
-                current_project["has_memo"] = True
-                current_project["memo_path"] = os.path.join(project_path, "claude_memo.md")
-                
-                return f"Created structured JSON memo at {result_path}"
-            elif output_format.lower() == "markdown":
-                # Use the explore_project function to generate a markdown memo
-                memo_content = explore_project(project_path)
-                memo_path = os.path.join(project_path, "claude_memo.md")
-                
-                with open(memo_path, "w") as f:
-                    f.write(memo_content)
-                
-                # Update current project info
-                current_project["has_memo"] = True
-                current_project["memo_path"] = memo_path
-                
-                return f"Created structured markdown memo at {memo_path}"
-            else:
-                return f"Unsupported output format: {output_format}. Use 'json' or 'markdown'."
-        except Exception as e:
-            return f"Error creating structured project memo: {str(e)}"
-            
-    @mcp.tool()
-    def index_file(file_path: str, description: str, category: str = "Uncategorized") -> str:
-        """
-        Add or update a file in the project's file index.
-        
-        Args:
-            file_path: Path to the file to index (relative to project root)
-            description: Brief description of the file's purpose
-            category: Category for organization (e.g., "Core", "Utils", "Tests")
-            
-        Returns:
-            Success message or error
-        """
-        global current_project
-        if not current_project["path"]:
-            return "No active project. Use discover_projects and use_project to select a project."
-            
-        try:
-            # Make sure file exists
-            absolute_path = file_path
-            if not os.path.isabs(file_path):
-                absolute_path = os.path.join(current_project["path"], file_path)
-                
-            if not os.path.exists(absolute_path):
-                return f"File not found: {file_path}"
-                
-            # Get file metadata
-            mtime = os.path.getmtime(absolute_path)
-            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-            file_size = os.path.getsize(absolute_path)
-            size_str = f"{file_size / 1024:.1f} KB" if file_size >= 1024 else f"{file_size} bytes"
-            
-            # Create file index entry
-            entry = {
-                "path": file_path,
-                "description": description,
-                "category": category,
-                "last_modified": mtime_str,
-                "size": size_str
-            }
-            
-            # Read memo content to find file index section
-            memo_path = current_project.get("memo_path")
-            if not memo_path or not os.path.exists(memo_path):
-                return "No memo file found. Create a project memo first."
-                
-            with open(memo_path, "r") as f:
-                content = f.read()
-                
-            # Look for File Index section
-            file_index_section = re.search(r"## File Index\n(.*?)(?=\n##|\Z)", content, re.DOTALL)
-            file_index_entries = {}
-            
-            if file_index_section:
-                # Parse existing entries
-                section_content = file_index_section.group(1)
-                category_pattern = r"### (.*?)\n(.*?)(?=\n###|\Z)"
-                for category_match in re.finditer(category_pattern, section_content, re.DOTALL):
-                    cat_name = category_match.group(1)
-                    cat_content = category_match.group(2)
-                    
-                    if cat_name not in file_index_entries:
-                        file_index_entries[cat_name] = []
-                        
-                    file_pattern = r"- \*\*(.*?)\*\*: (.*)"
-                    for file_match in re.finditer(file_pattern, cat_content):
-                        file_path = file_match.group(1)
-                        file_desc = file_match.group(2)
-                        file_index_entries[cat_name].append((file_path, file_desc))
-            
-            # Add or update entry
-            if entry["category"] not in file_index_entries:
-                file_index_entries[entry["category"]] = []
-                
-            # Check if file already exists
-            found = False
-            for i, (path, _) in enumerate(file_index_entries[entry["category"]]):
-                if path == entry["path"]:
-                    # Update existing entry
-                    file_index_entries[entry["category"]][i] = (entry["path"], entry["description"])
-                    found = True
-                    break
-                    
-            if not found:
-                file_index_entries[entry["category"]].append((entry["path"], entry["description"]))
-            
-            # Generate new file index content
-            new_index_content = "\n## File Index\n"
-            for cat, entries in sorted(file_index_entries.items()):
-                new_index_content += f"\n### {cat}\n"
-                for path, desc in sorted(entries):
-                    new_index_content += f"- **{path}**: {desc}\n"
-            
-            # Replace or append file index section
-            if file_index_section:
-                updated_content = content.replace(file_index_section.group(0), new_index_content)
-            else:
-                # Append at the end
-                updated_content = content.rstrip() + "\n" + new_index_content
-            
-            # Write updated content back to memo
-            with open(memo_path, "w") as f:
-                f.write(updated_content)
-                
-            return f"Successfully indexed file: {file_path} in category: {entry['category']}"
-        except Exception as e:
-            return f"Error indexing file: {str(e)}"
     
     @mcp.tool()
     def search_for_project(name: str, base_dir: Optional[str] = None) -> str:
@@ -566,14 +386,122 @@ Creating a project memo would help maintain knowledge about this project across 
             # Format results
             result = [f"Found {len(matches)} projects matching '{name}':"]
             for project in matches:
-                memo_status = "Has memo" if project["has_memo"] else "No memo"
                 project_type = f"Type: {project['type']}" if project.get("type") else ""
-                result.append(f"- {project['name']} ({memo_status}) {project_type} - {project['path']}")
+                result.append(f"- {project['name']} {project_type} - {project['path']}")
                 result.append(f"  Use project with: use_project(\"{project['path']}\")")
                 
             return "\n".join(result)
         except Exception as e:
             return f"Error searching for projects: {str(e)}"
+            
+    @mcp.tool()
+    def export_project_to_knowledge_graph(project_knowledge: str) -> str:
+        """
+        Export project knowledge to the knowledge graph storage.
+        
+        This tool takes structured knowledge about a project as a JSON STRING (not a Python object/dictionary)
+        and stores it in the knowledge graph for future reference.
+        
+        Args:
+            project_knowledge: JSON string containing project entity and relation data. 
+                Must be a properly formatted JSON string (use json.dumps() to convert Python objects).
+                Expected format (as a string):
+                {
+                  "project_name": "MyProject",
+                  "entities": [...],
+                  "relations": [...]
+                }
+                
+        Example usage:
+            knowledge_object = {
+                "project_name": "MyProject",
+                "entities": [...],
+                "relations": [...]
+            }
+            # Convert to JSON string before passing:
+            result = export_project_to_knowledge_graph(json.dumps(knowledge_object))
+            
+        Returns:
+            Success or error message
+        """
+        try:
+            # Access the knowledge_graph manager
+            from desktop_commander.tools.knowledge_graph import graph_manager
+            
+            # Parse the knowledge data
+            data = json.loads(project_knowledge)
+            
+            # Validate required fields
+            if "project_name" not in data:
+                return "Error: Missing required 'project_name' field in knowledge data"
+                
+            if "entities" not in data or "relations" not in data:
+                return "Error: Knowledge data must contain both 'entities' and 'relations' arrays"
+                
+            project_name = data["project_name"]
+            
+            # Extract the key fields
+            graph_data = {
+                "entities": data["entities"],
+                "relations": data["relations"],
+                "metadata": {
+                    "exported_at": datetime.now().isoformat(),
+                    "entity_count": len(data["entities"]),
+                    "relation_count": len(data["relations"])
+                }
+            }
+            
+            # Save to the knowledge graph
+            success = graph_manager.save_graph(project_name, graph_data)
+            
+            if success:
+                return f"""Successfully exported knowledge graph for project: {project_name}
+                
+Knowledge Graph Resources:
+- Complete graph: knowledge://{project_name}/graph
+- Entities only: knowledge://{project_name}/entities
+- Relations only: knowledge://{project_name}/relations
+- Entity by name: knowledge://{project_name}/entity/{{entity_name}}
+- Entities by type: knowledge://{project_name}/entity_type/{{entity_type}}"""
+            else:
+                return f"Failed to export knowledge graph for project: {project_name}"
+        except json.JSONDecodeError:
+            return "Error: Invalid JSON data provided for knowledge graph"
+        except Exception as e:
+            return f"Error exporting project to knowledge graph: {str(e)}"
+            
+    @mcp.tool()
+    def import_project_from_knowledge_graph(project_name: str) -> str:
+        """
+        Import project knowledge from the knowledge graph storage.
+        
+        Args:
+            project_name: Name of the project to import
+            
+        Returns:
+            Project knowledge as JSON string or error message
+        """
+        try:
+            # Access the knowledge_graph manager
+            from desktop_commander.tools.knowledge_graph import graph_manager
+            
+            # Load from the knowledge graph
+            graph_data = graph_manager.load_graph(project_name)
+            
+            if not graph_data:
+                return f"No knowledge graph found for project: {project_name}"
+                
+            # Format the output
+            result = {
+                "project_name": project_name,
+                "entities": graph_data.get("entities", []),
+                "relations": graph_data.get("relations", []),
+                "metadata": graph_data.get("metadata", {})
+            }
+            
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            return f"Error importing project from knowledge graph: {str(e)}"
 
     # Helper functions (not exposed as tools)
     def _check_if_project(directory: str) -> Optional[Dict]:
@@ -587,16 +515,8 @@ Creating a project memo would help maintain knowledge about this project across 
         project_info = {
             "name": dir_name,
             "path": directory,
-            "memo_path": None,
-            "has_memo": False,
             "type": None
         }
-        
-        # Check for memo file
-        memo_path = os.path.join(directory, "claude_memo.md")
-        if os.path.exists(memo_path):
-            project_info["memo_path"] = memo_path
-            project_info["has_memo"] = True
         
         # Check for project indicators
         if os.path.exists(os.path.join(directory, ".git")):
@@ -619,10 +539,6 @@ Creating a project memo would help maintain knowledge about this project across 
             project_info["type"] = "rust"
             return project_info
             
-        # If it has a memo file but no other indicators, still consider it a project
-        if project_info["has_memo"]:
-            return project_info
-            
         # Look for common project directories
         common_dirs = ["src", "lib", "app", "source"]
         for common_dir in common_dirs:
@@ -632,10 +548,3 @@ Creating a project memo would help maintain knowledge about this project across 
         # Not enough evidence this is a project
         return None
         
-    def _load_memo(memo_path: str) -> str:
-        """Load memo content from file."""
-        try:
-            with open(memo_path, "r") as f:
-                return f.read()
-        except Exception as e:
-            return f"Error loading memo: {str(e)}"

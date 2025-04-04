@@ -66,21 +66,104 @@ The server provides these tool categories:
 - `code_search`: Text and code search
 
 ### Edit Tools
-- `edit_block`: Apply surgical text replacements (best for changes <20% of file size)
-- `write_file`: Complete file rewrites (best for large changes >20% or when edit_block fails)
+- `edit_block`: Apply a single surgical text replacement to a file
+- `edit_file`: Apply multiple text replacements to a file in one operation
+- `write_file`: Complete file rewrites with smart handling of different file types
 
-Search/Replace Block Format:
+#### Enhanced JSON Handling
+The `write_file` tool automatically:
+- Detects and formats JSON content (regardless of file extension)
+- Validates JSON syntax and provides helpful error messages
+- Creates parent directories automatically
+- Preserves non-ASCII characters in JSON files
+
+#### JSON File Operations
+
+The project includes specialized tools for JSON files:
+
+1. **Create/overwrite JSON with `save_json`:**
+```python
+# Complete JSON replacement, properly formatted
+save_json(
+    "config.json", 
+    '{"name": "Test Configuration", "version": "1.0.0", "debug": false}'
+)
+
+# Triple-quoted strings work great for complex JSON
+save_json("config.json", """
+{
+  "name": "Test Configuration",
+  "version": "1.0.0",
+  "settings": {
+    "debug": false,
+    "maxRetries": 3
+  }
+}
+""")
 ```
-filepath.ext
-<<<<<<< SEARCH
-new code to insert
->>>>>>> REPLACE
+
+2. **Update specific JSON properties with `edit_json`:**
+```python
+# Only modifies the specified keys, keeps the rest unchanged
+edit_json(
+    "config.json", 
+    '{"version": "1.1.0", "settings.debug": true}'
+)
+
+# Supports dot notation for nested properties
+edit_json("config.json", """
+{
+  "version": "2.0.0",
+  "settings.maxRetries": 5,
+  "settings.timeout": 60000,
+  "features": ["export", "sharing", "reporting"]
+}
+""")
+```
+
+3. **Using the general `write_file` tool:**
+```python
+# When using write_file, JSON must be a properly formatted string
+write_file(
+    "config.json", 
+    '{"name": "Test Configuration", "version": "1.0.0", "debug": false}'
+)
+```
+
+Both `save_json` and `edit_json` automatically:
+- Add the `.json` extension if not included in the path
+- Create parent directories if they don't exist
+- Format JSON with proper indentation
+- Support project-relative paths with the `proj:` prefix
+
+#### File Editing Options
+1. **Single Edit** with `edit_block`:
+```python
+edit_block(
+    file="config.json",
+    search='"version": "1.0.0"',
+    replace='"version": "1.1.0"',
+    dry_run=False  # Set to True to preview changes
+)
+```
+
+2. **Multiple Edits** with `edit_file`:
+```python
+edit_file(
+    file="config.json",
+    edits=[
+        {"oldText": '"version": "1.0.0"', "newText": '"version": "1.1.0"'},
+        {"oldText": '"debug": false', "newText": '"debug": true'}
+    ]
+)
 ```
 
 ## Security Features
 
 - Blocked commands list prevents dangerous operations
-- Path validation restricts file access to allowed directories
+- Directory whitelist controls which paths can be accessed (configured in config.json)
+- Path validation ensures file access is limited to whitelisted directories
+- Cross-platform path handling for both Windows and Linux/macOS
 - Symlink security to prevent path traversal attacks
 
 ## Handling Long-Running Commands
@@ -109,11 +192,38 @@ When running under Windows Subsystem for Linux (WSL):
 - Be aware of path differences between Windows and Linux
 - The memo file is stored at the project root
 
+## Directory Whitelist Configuration
+
+The Desktop Commander restricts file access to directories specified in the `dir_whitelist` in `config.json`:
+
+```json
+{
+  "dir_whitelist": [
+    "",                // Empty string means home directory itself
+    "src",             // ~/src directory (relative to home)
+    "work/src",        // ~/work/src directory
+    "/tmp",            // Absolute path (Linux/Unix)
+    "C:/tmp",          // Windows path with forward slashes
+    "C:\\Users\\Public", // Windows path with backslashes
+    "D:\\my_av"        // Another Windows path with backslashes
+  ]
+}
+```
+
+The whitelist supports:
+- **Relative paths**: Relative to the user's home directory (e.g., "src", "documents/projects")
+- **Absolute paths**: Full paths that start with "/" (Unix/Linux) or drive letters (Windows)
+- **Home directory**: An empty string ("") allows access to the home directory itself
+- **Windows paths**: Supports both forward slashes ("C:/Users") and backslashes ("C:\\Users")
+- **Cross-platform paths**: Works on both Windows and Linux/macOS regardless of where you run it
+
+If a path is not within any of the whitelisted directories, the operation will be blocked with an "Access denied" error.
+
 ## Troubleshooting
 
 - **Connection Issues**: Ensure Claude desktop is properly configured and restarted after installation
 - **Permission Errors**: Check that scripts have executable permissions
-- **Path Access Errors**: Only paths within allowed directories can be accessed
+- **Path Access Errors**: Only paths within whitelisted directories can be accessed
 - **Blocked Commands**: Some dangerous commands are blocked by default for security
 
 ## License
