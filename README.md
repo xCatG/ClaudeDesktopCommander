@@ -103,59 +103,9 @@ save_json("config.json", """
 ```
 
 2. **Update specific JSON properties with `edit_json`:**
-```python
-# Only modifies the specified keys, keeps the rest unchanged
-edit_json(
-    "config.json", 
-    '{"version": "1.1.0", "settings.debug": true}'
-)
-
-# Supports dot notation for nested properties
-edit_json("config.json", """
-{
-  "version": "2.0.0",
-  "settings.maxRetries": 5,
-  "settings.timeout": 60000,
-  "features": ["export", "sharing", "reporting"]
-}
-""")
-```
-
-3. **Using the general `write_file` tool:**
-```python
-# When using write_file, JSON must be a properly formatted string
-write_file(
-    "config.json", 
-    '{"name": "Test Configuration", "version": "1.0.0", "debug": false}'
-)
-```
-
-Both `save_json` and `edit_json` automatically:
-- Add the `.json` extension if not included in the path
-- Create parent directories if they don't exist
-- Format JSON with proper indentation
-- Support project-relative paths with the `proj:` prefix
-
-#### File Editing Options
-1. **Single Edit** with `edit_block`:
-```python
-edit_block(
-    file="config.json",
-    search='"version": "1.0.0"',
-    replace='"version": "1.1.0"',
-    dry_run=False  # Set to True to preview changes
-)
-```
-
-2. **Multiple Edits** with `edit_file`:
-```python
-edit_file(
-    file="config.json",
-    edits=[
-        {"oldText": '"version": "1.0.0"', "newText": '"version": "1.1.0"'},
-        {"oldText": '"debug": false', "newText": '"debug": true'}
-    ]
-)
+4. Use `force_terminate` to stop if needed
+## Security
+Desktop Commander MCP has security features to protect your system:
 ```
 
 ## Security Features

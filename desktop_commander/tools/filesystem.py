@@ -3,6 +3,7 @@ Filesystem tools for the Desktop Commander MCP Server.
 Includes file operations, search, and path utilities.
 """
 
+import io
 import json
 import os
 import re
@@ -1125,3 +1126,455 @@ def register_tools(mcp):
             
         except Exception as e:
             return f"Error applying edit: {str(e)}"
+            
+    @mcp.tool()
+    async def edit_range(file: str, start_line: int, end_line: int, new_content: str, dry_run: bool = False) -> str:
+        """
+        Replace a specific range of lines in a file with new content.
+        
+        This tool is more token-efficient than edit_block since you only need to specify line numbers 
+        and the new content, without having to repeat the original content.
+        
+        IMPORTANT: Line numbers are 1-indexed (first line is line 1, not 0).
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/file.txt"
+        - Relative paths: "./file.txt" or "src/utils/helper.py" 
+        - Project-relative paths: "proj:src/main.py" (relative to current project)
+        
+        Args:
+            file: Path to the file to edit, with optional "proj:" prefix for project-relative paths
+            start_line: First line to replace (1-indexed)
+            end_line: Last line to replace (inclusive)
+            new_content: The new content to insert in place of the specified lines
+            dry_run: If True, show changes without applying them
+            
+        Example 1 - Replace lines 5-10 with new content:
+            edit_range(
+                file="proj:src/app.js",
+                start_line=5,
+                end_line=10,
+                new_content="const newFunction = () => {\n  console.log('New implementation');\n};"
+            )
+            
+        Example 2 - Insert 3 lines between existing lines:
+            edit_range(
+                file="proj:src/utils.py",
+                start_line=15,
+                end_line=15,
+                new_content="def new_helper():\n    print('New helper function')\n    return True"
+            )
+            
+        Example 3 - Delete lines without replacement:
+            edit_range(
+                file="proj:src/config.json",
+                start_line=7,
+                end_line=9,
+                new_content=""
+            )
+        
+        Returns:
+            Success message with git-style diff showing the changes
+        """
+        try:
+            # Validate parameters
+            if not file:
+                return "Error: Missing required 'file' parameter."
+                
+            if not isinstance(start_line, int) or not isinstance(end_line, int):
+                return "Error: start_line and end_line must be integers."
+                
+            if start_line < 1:
+                return "Error: start_line must be at least 1 (lines are 1-indexed)."
+                
+            if end_line < start_line:
+                return f"Error: end_line ({end_line}) must be greater than or equal to start_line ({start_line})."
+                
+            if not isinstance(new_content, str):
+                try:
+                    new_content = str(new_content)
+                except Exception as e:
+                    return f"Error: Could not convert new_content to string: {str(e)}"
+            
+            # Resolve and validate file path
+            resolved_path = _resolve_project_path(file)
+            valid_path = _validate_path(resolved_path)
+            
+            # Check if path is a directory
+            if os.path.isdir(valid_path):
+                return f"Error: {valid_path} is a directory, not a file. This tool can only edit individual files."
+            
+            # Check if file exists
+            if not os.path.isfile(valid_path):
+                return f"Error: File {valid_path} does not exist"
+            
+            # Read the file line by line
+            with open(valid_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            
+            # Validate line range
+            if start_line > len(lines) + 1:  # +1 to allow appending at the end
+                return f"Error: start_line ({start_line}) exceeds file length ({len(lines)} lines)"
+            
+            # Normalize line endings in new content
+            new_content = normalize_line_endings(new_content)
+            
+            # Convert new_content to lines, ensuring each line ends with a newline
+            if new_content:
+                new_lines = new_content.splitlines(True)  # Keep line endings
+                
+                # Ensure the last line has a newline
+                if new_lines and not new_lines[-1].endswith('\n'):
+                    new_lines[-1] = new_lines[-1] + '\n'
+            else:
+                new_lines = []
+            
+            # Create modified content
+            modified_lines = (
+                lines[:start_line-1] +  # Lines before the edit range
+                new_lines +             # New lines to insert
+                lines[min(end_line, len(lines)):]  # Lines after the edit range
+            )
+            
+            # Join all lines
+            original_content = ''.join(lines)
+            modified_content = ''.join(modified_lines)
+            
+            # Create unified diff
+            diff_text = create_unified_diff(original_content, modified_content, file)
+            
+            # In dry run mode, just return the diff
+            if dry_run:
+                return f"Showing changes that would be applied to {file} (lines {start_line}-{end_line}):\n\n```diff\n{diff_text}\n```"
+            
+            # Write the file if not in dry run mode
+            with open(valid_path, "w", encoding="utf-8") as f:
+                f.write(modified_content)
+            
+            # Return success message with diff
+            return f"Successfully replaced lines {start_line}-{end_line} in {file}:\n\n```diff\n{diff_text}\n```"
+            
+        except Exception as e:
+            return f"Error editing lines: {str(e)}"
+
+    @mcp.tool()
+    async def edit_by_patch(file: str, patch_content: str, dry_run: bool = False) -> str:
+        """
+        Edit a file by applying a standard unified diff patch using the python-patch library.
+
+        This is generally the most robust and often token-efficient way to apply complex changes.
+        It handles context matching and fuzz factor, making it more resilient to minor file changes
+        than line-based or simple search-replace edits.
+
+        Requires the `patch` library to be installed (`pip install patch`).
+
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/file.txt"
+        - Relative paths: "./file.txt" or "src/utils/helper.py"
+        - Project-relative paths: "proj:src/main.py" (relative to current project)
+
+        Args:
+            file: Path to the file to edit, with optional "proj:" prefix for project-relative paths.
+            patch_content: A string containing the patch in unified diff format.
+            dry_run: If True, check if the patch applies cleanly and show the potential diff without saving changes.
+
+        The patch should follow the unified diff format:
+        --- a/original_file
+        +++ b/modified_file
+        @@ -old_start,old_count +new_start,new_count @@
+        context line
+        -deleted line
+        +added line
+        context line
+
+        Returns:
+            Success message including the applied diff, or detailed error information.
+        """
+        original_encoding = None # Variable to store detected encoding
+        try:
+            # Attempt to import the patch library
+            try:
+                from patch import fromstring as patch_from_string
+            except ImportError:
+                return "Error: The 'patch' library is required for edit_by_patch. Please install it (`pip install patch`)."
+
+            # Validate parameters
+            if not file:
+                return "Error: Missing required 'file' parameter."
+            if not isinstance(patch_content, str) or not patch_content.strip():
+                return "Error: 'patch_content' must be a non-empty string containing unified diff content."
+            if not re.search(r'^(---|\+\+\+|@@)', patch_content.strip(), re.MULTILINE):
+                print("Warning: Provided patch content doesn't obviously start with '---', '+++', or '@@'. Proceeding, but ensure it's a valid unified diff.", file=sys.stderr)
+
+            # --- Path Resolution and Validation ---
+            resolved_path = _resolve_project_path(file)
+            valid_path = _validate_path(resolved_path)
+            if os.path.isdir(valid_path):
+                return f"Error: {valid_path} is a directory, not a file."
+            if not os.path.isfile(valid_path):
+                return f"Error: File {valid_path} does not exist"
+
+            # --- Read Original File and Determine Encoding ---
+            try:
+                with open(valid_path, "rb") as f:
+                    original_bytes = f.read()
+                # Try decoding with UTF-8 first, remember the encoding
+                try:
+                    original_content_str_raw = original_bytes.decode('utf-8')
+                    original_encoding = 'utf-8'
+                except UnicodeDecodeError:
+                    # Fallback to latin-1 if UTF-8 fails, remember the encoding
+                    original_content_str_raw = original_bytes.decode('latin-1')
+                    original_encoding = 'latin-1'
+                    print(f"Warning: Could not decode file {valid_path} as UTF-8, using latin-1.", file=sys.stderr)
+            except Exception as read_err:
+                # This is where the original error message likely came from if read fails entirely
+                return f"Error reading original file {valid_path}: {str(read_err)}"
+
+            # --- Normalize Content and Patch ---
+            # Normalize line endings for internal processing
+            original_content_str_normalized = normalize_line_endings(original_content_str_raw)
+            patch_content_normalized = normalize_line_endings(patch_content)
+
+            # --- Encode Normalized Content for Patch Library ---
+            try:
+                # Re-encode the normalized string using the detected encoding
+                original_bytes_normalized = original_content_str_normalized.encode(original_encoding)
+            except Exception as encode_err:
+                return f"Error preparing original content for patching: {str(encode_err)}"
+
+            # --- Parse the Normalized Patch ---
+            try:
+                # Encode the normalized patch string to bytes (use utf-8 for standard patch format)
+                patch_bytes_normalized = patch_content_normalized.encode('utf-8')
+                patch_set = patch_from_string(patch_bytes_normalized)
+                if not patch_set:
+                    if len(patch_bytes_normalized) > 0:
+                        return "Error: Failed to parse the provided patch content. Ensure it's a valid unified diff after line ending normalization."
+                    else:
+                        return "Error: Empty patch content provided."
+            except Exception as parse_err:
+                return f"Error processing or parsing patch content: {str(parse_err)}"
+
+            # --- Apply the Patch ---
+            # Apply the parsed patch to the *normalized* original bytes
+            patched_bytes = patch_set.apply(original_bytes_normalized)
+
+            if patched_bytes is False:
+                # Patch failed - provide hints
+                return (f"Error: The patch could not be applied cleanly to {file}. "
+                        "Possible reasons:\n"
+                        "1. File content mismatch (file changed or patch context incorrect).\n"
+                        "2. Whitespace or line ending differences between patch context and file.\n"
+                        "3. Incorrect line numbers in patch hunk headers (@@ ... @@).\n"
+                        "Suggestion: Read the file again and generate a fresh patch.")
+
+            # --- Decode Patched Bytes and Prepare Output ---
+            try:
+                # Decode the result using the originally detected file encoding
+                patched_content_str = patched_bytes.decode(original_encoding)
+            except Exception as decode_err:
+                return f"Error decoding patched content using encoding '{original_encoding}': {str(decode_err)}"
+
+            # Create the final diff display using the string representations
+            # Compare the initially read (but normalized) string with the final patched string
+            final_diff_text = create_unified_diff(original_content_str_normalized, patched_content_str, file)
+
+            # --- Handle dry_run or Actual Write ---
+            if dry_run:
+                return f"Dry run: Patch applies successfully to {file}. Predicted changes:\n\n```diff\n{final_diff_text}\n```"
+            else:
+                # Write the final patched bytes (which preserves original encoding nuances)
+                try:
+                    with open(valid_path, "wb") as f:
+                        f.write(patched_bytes) # Write the raw bytes result from patch apply
+                    return f"Successfully applied patch to {file}:\n\n```diff\n{final_diff_text}\n```"
+                except Exception as write_err:
+                    return f"Error writing patched file {valid_path}: {str(write_err)}"
+
+        except Exception as e:
+            # General exception catch-all
+            print(f"Unexpected error in edit_by_patch: {type(e).__name__}: {str(e)}", file=sys.stderr)
+            # Consider logging the full traceback here
+            return f"Error applying patch: An unexpected error occurred: {str(e)}"
+        
+    #@mcp.tool()
+    async def edit_by_patch_old(file: str, patch: str, dry_run: bool = False) -> str:
+        """
+        Edit a file by applying a unified diff patch.
+        
+        This is the most token-efficient way to make edits since you only need to specify
+        the minimal changes in diff format without repeating unchanged content.
+        
+        Uses the patch-ng library for professional-grade patch application with all the 
+        features of GNU patch, including fuzzy matching, context handling, and more.
+        
+        Supports multiple path formats:
+        - Absolute paths: "/home/user/myproject/file.txt"
+        - Relative paths: "./file.txt" or "src/utils/helper.py"
+        - Project-relative paths: "proj:src/main.py" (relative to current project)
+        
+        Args:
+            file: Path to the file to edit, with optional "proj:" prefix for project-relative paths
+            patch: Unified diff patch content (must follow unified diff format)
+            dry_run: If True, show changes without applying them
+            
+        The patch should follow the unified diff format:
+        - Each changed block starts with @@ -old_start,old_count +new_start,new_count @@
+        - Lines starting with - are deletions
+        - Lines starting with + are additions
+        - Lines starting with space are context (unchanged)
+        
+        Example 1 - Change a function:
+            edit_by_patch(
+                file="proj:src/utils.js",
+                patch='''@@ -10,7 +10,7 @@
+ function hello() {
+-  console.log('hello');
++  console.log('hello world');
+   return true;
+ }
+'''
+            )
+            
+        Example 2 - Add lines to a file:
+            edit_by_patch(
+                file="proj:src/config.py",
+                patch='''@@ -5,0 +6,3 @@
++# New configuration options
++DEBUG = True
++LOGGING_LEVEL = 'INFO'
+'''
+            )
+            
+        Returns:
+            Success message or error information
+        """
+        try:
+            # Validate parameters
+            if not file:
+                return "Error: Missing required 'file' parameter."
+                
+            if not isinstance(patch, str) or not patch:
+                return "Error: patch must be a non-empty string containing unified diff content."
+            
+            # Check if patch looks like a unified diff by looking for @@ markers
+            if not re.search(r'@@ -\d+,\d+ \+\d+,\d+ @@', patch):
+                return ("Error: Invalid patch format. Patch must contain at least one hunk header "
+                        "in the form '@@ -old_start,old_count +new_start,new_count @@'")
+            
+            # Use Python's built-in unified diff parser instead of external libraries
+            import difflib
+            
+            # Resolve and validate file path
+            resolved_path = _resolve_project_path(file)
+            valid_path = _validate_path(resolved_path)
+            
+            # Check if path is a directory
+            if os.path.isdir(valid_path):
+                return f"Error: {valid_path} is a directory, not a file. This tool can only edit individual files."
+            
+            # Check if file exists
+            if not os.path.isfile(valid_path):
+                return f"Error: File {valid_path} does not exist"
+            
+            # Read the original file
+            with open(valid_path, "r", encoding="utf-8", errors="replace") as f:
+                original_content = f.read()
+            
+            # Normalize line endings in original content
+            original_content = normalize_line_endings(original_content)
+            original_lines = original_content.splitlines()
+            
+            # Parse the patch manually using a simplified algorithm
+            patched_lines = original_lines.copy()
+            
+            # Parse hunks from the patch
+            hunks = []
+            current_hunk = None
+            hunk_lines = []
+            
+            for line in patch.splitlines():
+                if line.startswith('@@ '):
+                    # Complete the previous hunk if exists
+                    if current_hunk is not None:
+                        current_hunk['lines'] = hunk_lines
+                        hunks.append(current_hunk)
+                        hunk_lines = []
+                    
+                    # Parse the hunk header @@ -start,count +start,count @@
+                    match = re.match(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@', line)
+                    if match:
+                        old_start = int(match.group(1))
+                        old_count = int(match.group(2))
+                        new_start = int(match.group(3))
+                        new_count = int(match.group(4))
+                        
+                        current_hunk = {
+                            'old_start': old_start,
+                            'old_count': old_count,
+                            'new_start': new_start,
+                            'new_count': new_count
+                        }
+                elif current_hunk is not None:
+                    hunk_lines.append(line)
+            
+            # Add the last hunk if exists
+            if current_hunk is not None:
+                current_hunk['lines'] = hunk_lines
+                hunks.append(current_hunk)
+            
+            # Apply hunks (in reverse to avoid line number changes affecting later hunks)
+            modified_content = original_content
+            patched_lines = original_lines.copy()
+            
+            for hunk in reversed(hunks):
+                old_start = hunk['old_start']
+                old_count = hunk['old_count']
+                new_start = hunk['new_start']
+                new_count = hunk['new_count']
+                
+                # Process the hunk lines
+                old_lines = []  # Lines to be removed
+                new_lines = []  # Lines to be added
+                
+                for line in hunk['lines']:
+                    if line.startswith('-'):
+                        old_lines.append(line[1:])
+                    elif line.startswith('+'):
+                        new_lines.append(line[1:])
+                    elif line.startswith(' '):
+                        old_lines.append(line[1:])
+                        new_lines.append(line[1:])
+                
+                # Apply the changes to patched_lines
+                patched_lines[old_start-1:old_start-1+old_count] = new_lines
+            
+            # Create the new content
+            patched_content = '\n'.join(patched_lines)
+            if original_content.endswith('\n') and not patched_content.endswith('\n'):
+                patched_content += '\n'
+            
+            # Create actual diff for display
+            diff = difflib.unified_diff(
+                original_content.splitlines(),
+                patched_content.splitlines(),
+                fromfile=f"{file} (original)",
+                tofile=f"{file} (modified)",
+                lineterm=''
+            )
+            diff_text = '\n'.join(diff)
+            
+            # In dry run mode, just return the diff
+            if dry_run:
+                return f"Showing changes that would be applied to {file}:\n\n```diff\n{diff_text}\n```"
+            
+            # Write the file if not in dry run mode
+            with open(valid_path, 'w', encoding='utf-8') as f:
+                f.write(patched_content)
+            
+            # Return success message with diff
+            return f"Successfully applied patch to {file}:\n\n```diff\n{diff_text}\n```"
+            
+        except Exception as e:
+            return f"Error applying patch: {str(e)}"
