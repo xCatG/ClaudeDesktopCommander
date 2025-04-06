@@ -291,11 +291,18 @@ Would you like me to start exploring the project now?
             base_dir = os.path.abspath(base_dir)
             if not os.path.exists(base_dir):
                 return f"Base directory not found: {base_dir}"
-            # If project_path contains multiple parts, use the last part
-            project_name = os.path.basename(os.path.normpath(project_path))
+                
+            # First check if the provided path is already an absolute path
+            abs_project_path = os.path.abspath(project_path)
+            if os.path.exists(abs_project_path) and os.path.isdir(abs_project_path):
+                project_path = abs_project_path
+            else:
+                # If project_path contains multiple parts, use the last part
+                project_name = os.path.basename(os.path.normpath(project_path))
 
-            # Form the absolute path by appending the project name to base_dir
-            project_path = os.path.join(base_dir, project_name)
+                # Form the absolute path by appending the project name to base_dir
+                project_path = os.path.join(base_dir, project_name)
+                
             if not os.path.exists(project_path):
                 return f"Project not found: {project_path}"
                 
